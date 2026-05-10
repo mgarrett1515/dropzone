@@ -3876,7 +3876,7 @@ function buildAR(group, attach) {
 
 // ── HK UMP-45 ─────────────────────────────────────────────────────────────────
 function buildSMG(group, attach) {
-  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.043, Math.PI/2, 0, Math.PI, 0.04, -0.16, -0.50)) {
+  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.043, Math.PI/2, Math.PI, Math.PI, 0.04, -0.16, -0.50)) {
     group.userData.barrelTip = new THREE.Vector3(0, 0.012, -0.548);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(0,    -0.067, -0.24);
