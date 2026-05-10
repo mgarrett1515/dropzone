@@ -387,7 +387,7 @@ async function startGame() {
 // ============================================================================
 // SHOOTING RANGE
 // ============================================================================
-function startRange() {
+async function startRange() {
   globalThis._rangeMode = true;
   MAP.size = 400;
   camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.05, 600);
@@ -688,6 +688,7 @@ function startRange() {
   document.body.appendChild(badge);
 
   // ── SPAWN ────────────────────────────────────────────────────────────────
+  await Promise.all([preloadKar98(), preloadUmp45(), preloadBeretta(), preloadIzh27(), preloadSpas12()]);
   player=new Entity(0, SHOOTER_Z+BOOTH_D*0.5, true);
   player.botName='YOU';
   player.giveWeapon('pistol');
@@ -3875,7 +3876,7 @@ function buildAR(group, attach) {
 
 // ── HK UMP-45 ─────────────────────────────────────────────────────────────────
 function buildSMG(group, attach) {
-  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.55, 0, Math.PI/2, 0, 0.04, -0.10, -0.38)) {
+  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.043, Math.PI/2, 0, Math.PI, 0.04, -0.16, -0.50)) {
     group.userData.barrelTip = new THREE.Vector3(0, 0.012, -0.548);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(0,    -0.067, -0.24);
