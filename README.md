@@ -37,19 +37,30 @@ After `npm run dev`, open the URL it shows in the terminal (usually `http://loca
 
 ## Getting New Changes
 
-Whenever your collaborator has pushed updates and you want them on your machine, open a terminal in the project folder and run:
+Whenever your collaborator has pushed updates and you want them on your machine:
 
+**1. Open a terminal inside the project folder.**
+The easiest way is in VS Code — open the project, then press `Ctrl+`` (backtick) to open the built-in terminal. It automatically starts in the right folder.
+
+Alternatively, open PowerShell and navigate there manually:
+```bash
+cd C:\path\to\dropzone
+```
+
+**2. Run:**
 ```bash
 git pull
 ```
 
 That's it — it fetches and applies everything new from the repository.
 
+> Git commands only work when your terminal is inside the project folder (the one containing `package.json`). If you see `fatal: not a git repository`, you're in the wrong folder.
+
 ---
 
 ## Uploading Your Changes
 
-After you've made edits and want to share them, run these three commands:
+After you've made edits and want to share them, make sure your terminal is in the project folder (see above), then run:
 
 ```bash
 git add .
