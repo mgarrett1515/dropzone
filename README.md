@@ -6,17 +6,22 @@ A browser-based battle royale built with Three.js and Vite.
 
 ## First Time Setup
 
-**1. Install prerequisites (one-time):**
-- [Node.js](https://nodejs.org) — download and install the LTS version
-- [Git](https://git-scm.com/download/win) — download and install with all defaults
+Do this once when you first get the project.
 
-**2. Set your name for commits (one-time):**
+**Step 1 — Install these two programs if you don't have them:**
+- [Node.js](https://nodejs.org) — click the LTS download and run the installer
+- [Git](https://git-scm.com/download/win) — run the installer with all default options
+
+**Step 2 — Tell Git your name (only do this once ever):**
+
+Open a terminal (search "cmd" or "PowerShell" in the Start menu) and run:
 ```bash
 git config --global user.name "YourName"
 git config --global user.email "your@email.com"
 ```
+This just labels your commits so we know who made what change.
 
-**3. Clone and run the project:**
+**Step 3 — Download the project:**
 ```bash
 git clone https://github.com/mgarrett1515/dropzone.git
 cd dropzone
@@ -24,29 +29,37 @@ npm install
 npm run dev
 ```
 
-Then open the URL shown in the terminal (usually `http://localhost:5173`).
+After `npm run dev`, open the URL it shows in the terminal (usually `http://localhost:5173`) in your browser.
+
+> After cloning, Git automatically remembers this repository. You never need to type the URL again — `git pull` and `git push` always go to this repo.
 
 ---
 
-## Pulling New Changes
+## Getting New Changes
 
-Run this before you start working to get the latest updates from GitHub:
+Whenever your collaborator has pushed updates and you want them on your machine, open a terminal in the project folder and run:
 
 ```bash
 git pull
 ```
 
+That's it — it fetches and applies everything new from the repository.
+
 ---
 
 ## Uploading Your Changes
 
-After making changes, run these three commands to save and share them:
+After you've made edits and want to share them, run these three commands:
 
 ```bash
 git add .
-git commit -m "describe what you changed"
+git commit -m "describe what you changed here"
 git push
 ```
+
+- `git add .` — stages all your changed files
+- `git commit -m "..."` — saves a snapshot with a label (replace the message with something descriptive, like `"added new gun"`)
+- `git push` — sends it up to GitHub so your collaborator can pull it
 
 ---
 
