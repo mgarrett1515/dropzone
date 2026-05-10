@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DROPZONE — Battle Royale Prototype</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+<div id="menu">
+  <h1>DROPZONE</h1>
+  <div class="sub">— BATTLE  ROYALE  PROTOTYPE —</div>
+  <div class="panel">
+    <div class="row">
+      <label>BOT COUNT</label>
+      <input type="range" id="botCount" min="5" max="60" value="20">
+      <div class="val" id="botCountVal">20</div>
+    </div>
+    <div class="row">
+      <label>BOT SKILL</label>
+      <div class="seg" id="botSkill">
+        <button data-v="0.4">EASY</button>
+        <button data-v="0.7" class="on">NORMAL</button>
+        <button data-v="1.0">HARD</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>VIEW</label>
+      <div class="seg" id="viewMode">
+        <button data-v="fp" class="on">FIRST PERSON</button>
+        <button data-v="tp">THIRD PERSON</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>SHOULDER</label>
+      <div class="seg" id="shoulder">
+        <button data-v="r" class="on">RIGHT</button>
+        <button data-v="l">LEFT</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>MAP SIZE</label>
+      <div class="seg" id="mapSize">
+        <button data-v="400">SMALL</button>
+        <button data-v="700" class="on">MEDIUM</button>
+        <button data-v="1000">LARGE</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>GAMERTAG</label>
+      <input type="text" id="gamertagInput" maxlength="16" placeholder="ENTER NAME" style="background:#111;color:#fff;border:1px solid #444;padding:4px 8px;font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;width:140px;text-transform:uppercase;">
+    </div>
+    <button id="playBtn">DROP IN</button>
+    <button id="rangeBtn" style="margin-top:10px;width:100%;padding:12px;border:1px solid #ff5028;background:transparent;color:#ff5028;font-family:'Bebas Neue';font-size:22px;letter-spacing:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,80,40,0.15)'" onmouseout="this.style.background='transparent'">SHOOTING RANGE</button>
+    <div class="controls-hint">
+      <b>CONTROLS</b><br>
+      WASD move · SHIFT sprint · SPACE jump · C crouch (toggle)<br>
+      Q / E lean left / right · V toggle camera · X swap shoulder<br>
+      LMB shoot · RMB aim · R reload · F loot · H heal<br>
+      1/2/3 weapons · TAB inventory · M minimap · ESC pause
+    </div>
+  </div>
+</div>
+
+<div id="vignette"></div>
+
+<div id="hud">
+  <div id="crosshair"><span class="v2"></span><span class="h2"></span><span class="dot"></span></div>
+  <div id="scope">
+    <!-- Reticle SVG — JS swaps contents based on scope type -->
+    <svg id="scopeReticle" viewBox="-100 -100 200 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+      <!-- default: ACOG-style for 4x/8x, overwritten by JS for 2x -->
+      <g id="reticle4x">
+        <!-- Green ACOG chevron — no black duplicate -->
+        <polyline points="-6,2 0,-5 6,2" fill="none" stroke="#22ee44" stroke-width="1.2" stroke-linejoin="miter" opacity="0.92"/>
+        <!-- BDC drop line -->
+        <line x1="0" y1="4" x2="0" y2="42" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <!-- BDC range bars -->
+        <line x1="-5"  y1="12" x2="5"  y2="12" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <line x1="-7"  y1="22" x2="7"  y2="22" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <line x1="-9"  y1="32" x2="9"  y2="32" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <line x1="-11" y1="42" x2="11" y2="42" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <!-- Windage stadia -->
+        <line x1="-42" y1="0" x2="-10" y2="0" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <line x1="10"  y1="0" x2="42"  y2="0" stroke="#22ee44" stroke-width="0.6" opacity="0.75"/>
+        <line x1="-22" y1="-2" x2="-22" y2="2" stroke="#22ee44" stroke-width="0.5" opacity="0.6"/>
+        <line x1="22"  y1="-2" x2="22"  y2="2" stroke="#22ee44" stroke-width="0.5" opacity="0.6"/>
+        <!-- Glow at tip -->
+        <circle cx="0" cy="-1" r="1.8" fill="#22ee44" opacity="0.22"/>
+      </g>
+      <g id="reticle2x" display="none">
+        <!-- Simple duplex crosshair — thick outer posts, fine gap at centre -->
+        <line x1="-60" y1="0" x2="-8" y2="0" stroke="#22ee44" stroke-width="1.2" opacity="0.9"/>
+        <line x1="8"   y1="0" x2="60" y2="0" stroke="#22ee44" stroke-width="1.2" opacity="0.9"/>
+        <line x1="0" y1="-60" x2="0" y2="-8" stroke="#22ee44" stroke-width="1.2" opacity="0.9"/>
+        <line x1="0" y1="8"   x2="0" y2="60" stroke="#22ee44" stroke-width="1.2" opacity="0.9"/>
+        <!-- Fine centre cross -->
+        <line x1="-4" y1="0" x2="4" y2="0" stroke="#22ee44" stroke-width="0.5" opacity="0.7"/>
+        <line x1="0" y1="-4" x2="0" y2="4" stroke="#22ee44" stroke-width="0.5" opacity="0.7"/>
+        <!-- Centre dot -->
+        <circle cx="0" cy="0" r="1.2" fill="#22ee44" opacity="0.85"/>
+        <!-- Range stadia ticks on horizontal -->
+        <line x1="-20" y1="-2.5" x2="-20" y2="2.5" stroke="#22ee44" stroke-width="0.6" opacity="0.65"/>
+        <line x1="20"  y1="-2.5" x2="20"  y2="2.5" stroke="#22ee44" stroke-width="0.6" opacity="0.65"/>
+      </g>
+    </svg>
+  </div>
+  <div id="reddotOverlay"><div class="dot-ring"></div></div>
+
+  <div id="searchProgressWrap" style="display:none;position:absolute;left:50%;bottom:160px;transform:translateX(-50%);width:280px;pointer-events:none;">
+    <div id="searchProgressLabel" style="font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:3px;color:#ffcc00;margin-bottom:5px;text-align:center;"></div>
+    <div style="height:6px;background:rgba(0,0,0,0.6);border:1px solid #ffcc00;"><div id="searchProgressFill" style="height:100%;background:#ffcc00;width:0%;"></div></div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:2px;color:#888;text-align:center;margin-top:4px;">HOLD F</div>
+  </div>
+  <div id="damage"></div>
+  <div id="hitmarker"><span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span></div>
+  <div id="stats">
+    <div>ALIVE <span class="alive" id="aliveCount">0</span></div>
+    <div>KILLS <span id="killCount">0</span></div>
+  </div>
+  <div id="zoneInfo">ZONE — <span id="zoneStage">SAFE</span><br>NEXT IN <span id="zoneTime">--</span>s</div>
+  <div id="healthPanel">
+    <div class="bar-label">HEALTH</div>
+    <div class="bar-wrap" id="hpBar"><div class="fill" style="width:100%"></div><div class="bar-num" id="hpNum">100</div></div>
+    <div class="bar-label">ARMOR</div>
+    <div class="bar-wrap" id="armorBar"><div class="fill" style="width:0%"></div><div class="bar-num" id="armorNum">0</div></div>
+  </div>
+  <div id="ammoBox">
+    <div class="gun" id="gunName">UNARMED</div>
+    <div><span class="ammo" id="ammoCur">--</span><span class="reserve"> / <span id="ammoRes">--</span></span></div>
+  </div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+  <div id="inventory">
+    <div class="slot" id="slot1"><div class="key">1</div><div class="name">—</div></div>
+    <div class="slot" id="slot2"><div class="key">2</div><div class="name">—</div></div>
+    <div class="slot" id="slot3"><div class="key">3</div><div class="name">PISTOL</div></div>
+    <div class="slot" id="slot4"><div class="key">4</div><div class="name">—</div></div>
+  </div>
+  <div id="lootPrompt"><b>F</b> <span id="lootText"></span></div>
+  <div id="healBar"><div class="bar-label" id="healBarLabel">HEALING</div><div class="bar-wrap"><div class="fill" id="healBarFill"></div><div class="bar-label-right" id="healBarTime"></div></div></div>
+  <div id="killfeed"></div>
+</div>
+
+<div id="inventoryPanel">
+  <div class="inv-header">
+    <h2>INVENTORY</h2>
+    <div class="inv-close-hint">TAB to close</div>
+  </div>
+  <div class="inv-grid">
+    <div class="inv-col">
+      <div class="inv-section-title">WEAPONS &amp; ATTACHMENTS</div>
+      <div class="inv-weapons" id="invWeapons"></div>
+    </div>
+    <div class="inv-col">
+      <div class="inv-section-title">SUPPLIES</div>
+      <div class="inv-supplies" id="invSupplies"></div>
+      <div class="inv-section-title" style="margin-top:18px">VITALS</div>
+      <div class="inv-vitals" id="invVitals"></div>
+    </div>
+  </div>
+  <div class="inv-hint">
+    Click an attachment to remove it · Loot more by walking onto items and pressing F
+  </div>
+</div>
+
+<div id="clickHint" style="display:none">CLICK TO PLAY</div>
+
+<div id="endScreen">
+  <h1 id="endTitle">VICTORY</h1>
+  <div class="stats-end" id="endStats"></div>
+  <button onclick="location.reload()">PLAY AGAIN</button>
+</div>
+
+<div id="searchUI" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1000;pointer-events:all;align-items:center;justify-content:center;flex-direction:column;gap:20px;">
+  <div id="searchUITitle" style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:6px;color:#ff5028;"></div>
+  <div style="display:flex;gap:32px;align-items:flex-start;">
+    <div style="min-width:300px;max-height:60vh;overflow-y:auto;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:3px;color:#666;margin-bottom:12px;">CONTAINER CONTENTS</div>
+      <div id="searchContainerItems"></div>
+    </div>
+    <div style="width:1px;background:#222;align-self:stretch;"></div>
+    <div style="min-width:300px;max-height:60vh;overflow-y:auto;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:3px;color:#666;margin-bottom:12px;">YOUR LOADOUT</div>
+      <div id="searchPlayerItems"></div>
+    </div>
+  </div>
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:2px;color:#444;">CLICK ITEM TO TAKE · ESC TO CLOSE</div>
+</div>
+
+<div id="attachWeaponPicker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.90);z-index:1001;pointer-events:all;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+  <div id="attachPickerInfo" style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:4px;color:#33aaff;"></div>
+  <div id="attachPickerBtns" style="display:flex;flex-direction:column;gap:10px;min-width:260px;"></div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
