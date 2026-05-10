@@ -3826,7 +3826,7 @@ function buildPistol(group, attach) {
   if (BERETTA_MODEL) {
     // Barrel at +X in world space → Ry(+90°) maps +X → -Z (forward)
     _gltfGun(BERETTA_MODEL, group, 0.28, 0, Math.PI/2, 0, 0.04, -0.06, -0.22);
-    group.userData.barrelTip = new THREE.Vector3(0, 0.024, -0.222);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.024, -0.444);
     group.userData.basePos   = new THREE.Vector3(0.16, -0.18, -0.26);
     group.userData.adsPos    = new THREE.Vector3(-0.040, -0.035, -0.22);
     buildHands(group, 0.0, -0.05, false);
@@ -3865,7 +3865,7 @@ function buildAR(group, attach) {
     m4.position.set(-centre.x + 0.04, -centre.y - 0.10, -centre.z - 0.45);
 
     group.add(m4);
-    group.userData.barrelTip = new THREE.Vector3(0, 0.024, -0.956);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.010, -1.30);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.28);
     group.userData.adsPos    = new THREE.Vector3(-0.040, -0.0945, -0.32);
     buildHands(group, -0.085, -0.490, attach.grip === 'grip');
@@ -3877,7 +3877,7 @@ function buildAR(group, attach) {
 // ── HK UMP-45 ─────────────────────────────────────────────────────────────────
 function buildSMG(group, attach) {
   if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.086, Math.PI/2, 0, 0, 0.04, -0.16, -0.50)) {
-    group.userData.barrelTip = new THREE.Vector3(0, 0.012, -0.548);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.012, -1.096);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(-0.0635, -0.079, -0.24);
     buildHands(group, -0.085, -0.390, attach.grip === 'grip');
@@ -3891,7 +3891,7 @@ function buildSniper(group, attach) {
   if (KAR98_MODEL) {
     // Barrel already at -Z in world space after Sketchfab root — no rotation needed
     _gltfGun(KAR98_MODEL, group, 1.90, 0, 0, 0, 0.04, -0.10, -0.45);
-    group.userData.barrelTip = new THREE.Vector3(0, 0.034, -0.934);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.034, -1.868);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(-0.033, -0.065, -0.30);
     buildHands(group, -0.080, -0.490, false);
@@ -3903,7 +3903,7 @@ function buildSniper(group, attach) {
 // ── Over/Under Shotgun (IZH-27 GLTF) ─────────────────────────────────────────
 function buildShotgun(group, attach) {
   if (IZH27_MODEL && _gltfGun(IZH27_MODEL, group, 1.76, 0, Math.PI, 0, 0.04, -0.10, -0.45)) {
-    group.userData.barrelTip = new THREE.Vector3(0, 0.056, -0.862);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.056, -1.724);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(-0.040, -0.051, -0.20);
     buildHands(group, -0.080, -0.354, false);
@@ -4017,7 +4017,7 @@ function buildAK(group, attach) {
     ak.position.set(-centre.x + 0.04, -centre.y - 0.10, -centre.z - 0.45);
 
     group.add(ak);
-    group.userData.barrelTip = new THREE.Vector3(0, 0.028, -0.802);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.028, -1.604);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.28);
     group.userData.adsPos    = new THREE.Vector3(-0.027, -0.099, -0.30);
     buildHands(group, -0.080, -0.490, false);
@@ -4109,7 +4109,7 @@ function buildSPAS(group, attach) {
   if (SPAS12_MODEL) {
     // SPAS-12: barrel at +X in world space → Ry(+90°) maps +X → -Z (forward)
     _gltfGun(SPAS12_MODEL, group, 1.56, 0, Math.PI/2, 0, 0.04, -0.10, -0.42);
-    group.userData.barrelTip = new THREE.Vector3(0, 0.028, -0.716);
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.028, -1.432);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
     group.userData.adsPos    = new THREE.Vector3(-0.040, -0.024, -0.25);
     buildHands(group, -0.080, -0.490, false);
@@ -4442,7 +4442,7 @@ function attachMuzzleFlashToViewmodel() {
     muzzleFlash.material.dispose();
   }
   muzzleFlash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.10, 10, 8),
+    new THREE.SphereGeometry(player.weapon === 'pistol' ? 0.04 : 0.06, 10, 8),
     new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent:true, opacity:0, depthWrite:false })
   );
   muzzleFlash.visible = false;
