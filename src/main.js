@@ -3594,7 +3594,7 @@ function setupInput() {
     if (e.code === 'KeyI') { e.preventDefault(); toggleInventory(); }
     if (e.code === 'Escape') { cancelSearchProgress(); if (searchUIOpen) { closeSearchUI(); return; } if (inventoryOpen) { closeInventory(); return; } }
   });
-  document.addEventListener('keyup', e => { input[e.code] = false; if (e.code==='KeyF' && _searchProgress) cancelSearchProgress(); });
+  document.addEventListener('keyup', e => { input[e.code] = false; if (e.code==='KeyF') { if (_searchProgress) cancelSearchProgress(); _requireFRelease = false; } });
 
   // Click anywhere on the canvas (or HUD) to acquire pointer lock first.
   // Subsequent clicks fire the gun.
@@ -4230,18 +4230,18 @@ function buildMachete(group) {
   const M=new THREE.MeshStandardMaterial({color:0x9ab0c0,roughness:0.15,metalness:0.94});
   const G=new THREE.MeshStandardMaterial({color:0x2a1a0a,roughness:0.90,metalness:0.0});
   const SK=new THREE.MeshStandardMaterial({color:0xc28860,roughness:0.75});
-  // Blade — spine + edge
-  group.add(box(0.006,0.004,0.242,M, 0.002,0.001,-0.120));
-  group.add(box(0.002,0.002,0.228,M, 0.005,-0.003,-0.114));
+  // Blade — spine + edge, along Y axis (pointing up) so melee animation works correctly
+  group.add(box(0.006,0.242,0.004,M, 0.002,0.130,0.001));
+  group.add(box(0.002,0.228,0.002,M, 0.005,0.124,-0.003));
   // Blood groove
-  group.add(box(0.001,0.002,0.180,new THREE.MeshStandardMaterial({color:0x7a9aaa,roughness:0.1,metalness:0.9}), 0,0.001,-0.100));
+  group.add(box(0.001,0.180,0.002,new THREE.MeshStandardMaterial({color:0x7a9aaa,roughness:0.1,metalness:0.9}), 0,0.100,0.001));
   // Guard
-  group.add(box(0.046,0.009,0.020,M, 0,0,-0.010));
-  // Handle — multi-piece
-  group.add(box(0.018,0.096,0.018,G, 0,0.054,0));
-  group.add(box(0.022,0.012,0.022,M, 0,0.108,0));  // pommel
-  group.add(box(0.060,0.060,0.072,SK, 0.022,0.042,0.022));
-  group.userData.barrelTip=new THREE.Vector3(0,0,-0.241);
+  group.add(box(0.046,0.009,0.020,M, 0,0.005,0));
+  // Handle — extending downward from guard
+  group.add(box(0.018,0.096,0.018,G, 0,-0.048,0));
+  group.add(box(0.022,0.012,0.022,M, 0,-0.108,0));  // pommel
+  group.add(box(0.060,0.060,0.072,SK, 0.022,-0.048,0.022));  // hand
+  group.userData.barrelTip=new THREE.Vector3(0,0.241,0);
   group.userData.basePos=new THREE.Vector3(0.14,-0.18,-0.24);
   group.userData.adsPos=new THREE.Vector3(0.14,-0.18,-0.24);
 }
@@ -5179,11 +5179,12 @@ function updateLootPrompt() {
 }
 
 let _lootPickupCooldown = 0; // timestamp before which ground loot cannot be picked up
+let _requireFRelease = false; // must release F before picking up items dropped by garbage can
 
 function tryLoot() {
   if (searchUIOpen) return;
-  // Ground loot: instant pickup (but respect cooldown after garbage can scatter)
-  if (performance.now() >= _lootPickupCooldown) {
+  // Ground loot: instant pickup (but require F release after garbage can scatter)
+  if (performance.now() >= _lootPickupCooldown && !_requireFRelease) {
     const ground = nearestGroundLoot();
     if (ground) {
       if (ground.type === 'attachment') {
@@ -5223,6 +5224,7 @@ function startSearchProgress(container) {
         // Drop items on the ground — set cooldown so holding F doesn't instantly pick them up
         container.searched = true;
         _lootPickupCooldown = performance.now() + 1200; // 1.2s cooldown
+        _requireFRelease = true; // prevent pickup until F is released
         for (const item of (container.items || [])) {
           const ox = (Math.random()-0.5)*2.5, oz = (Math.random()-0.5)*2.5;
           if (item.key === 'dobble_golp') {
@@ -5378,9 +5380,22 @@ function showAttachWeaponPicker(item) {
   cancel.className = 'attach-pick-btn';
   cancel.style.borderColor = '#555'; cancel.style.color='#555';
   cancel.textContent = 'CANCEL';
-  cancel.onclick = () => { _pendingAttachment=null; picker.style.display='none'; };
+  cancel.onclick = () => { _pendingAttachment=null; _closePicker(); };
   btns.appendChild(cancel);
+  if (!searchUIOpen) document.exitPointerLock();
   picker.style.display = 'flex';
+}
+
+function _closePicker() {
+  document.getElementById('attachWeaponPicker').style.display = 'none';
+  if (!searchUIOpen && !gameOver && renderer) {
+    const hint = document.getElementById('clickHint');
+    if (hint) hint.style.display = 'none';
+    _reacquiringLock = true;
+    const p = renderer.domElement.requestPointerLock();
+    if (p && p.then) p.then(() => { _reacquiringLock = false; }).catch(() => { _reacquiringLock = false; });
+    else setTimeout(() => { _reacquiringLock = false; }, 400);
+  }
 }
 
 function applyAttachmentToWeapon(item, wk) {
@@ -5389,10 +5404,8 @@ function applyAttachmentToWeapon(item, wk) {
   player.attachments[wk][att.type] = item.key;
   addKillFeed('ATTACHED', att.name + ' → ' + WEAPONS[wk].name, null);
   buildViewmodel();
-  document.getElementById('attachWeaponPicker').style.display = 'none';
   if (_pendingAttachment) {
     if (_pendingAttachment.ground && _pendingAttachment.groundItem) {
-      // Remove from ground loot
       removeGroundLoot(_pendingAttachment.groundItem);
     } else if (_searchingContainer && _pendingAttachment.idx >= 0) {
       _searchingContainer.items.splice(_pendingAttachment.idx, 1);
@@ -5400,6 +5413,7 @@ function applyAttachmentToWeapon(item, wk) {
     }
     _pendingAttachment = null;
   }
+  _closePicker();
   renderSearchUI();
   updateHUD();
 }
