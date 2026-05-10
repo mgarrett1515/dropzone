@@ -162,7 +162,20 @@ function preloadAK() {
   const loader = new GLTFLoader();
   _akLoadPromise = new Promise((res, rej) =>
     loader.load('/weapons/ak47/scene.gltf', g => res(g.scene), null, rej)
-  ).then(scene => { AK_MODEL = scene; });
+  ).then(scene => {
+    scene.traverse(node => {
+      if (!node.isMesh) return;
+      const n = node.material?.name || '';
+      let color = 0x404040, roughness = 0.45, metalness = 0.75;
+      if (n === 'Wood')       { color = 0x4a2e18; roughness = 0.85; metalness = 0.00; }
+      else if (n === 'DarkMetal')  { color = 0x252222; }
+      else if (n === 'LightMetal') { color = 0x565656; roughness = 0.35; }
+      else if (n === 'material')   { color = 0xb88c28; roughness = 0.55; metalness = 0.40; }
+      else if (n === 'Plomo')      { color = 0x4e2e0c; roughness = 0.55; metalness = 0.30; }
+      node.material = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    });
+    AK_MODEL = scene;
+  });
   return _akLoadPromise;
 }
 preloadAK();
@@ -186,7 +199,13 @@ function preloadKar98()   { if (_kar98LoadPromise)   return _kar98LoadPromise;  
 function preloadUmp45()   { if (_ump45LoadPromise)   return _ump45LoadPromise;   const l=new GLTFLoader(); _ump45LoadPromise   = new Promise((r,j)=>l.load('/weapons/ump45/scene.gltf',  g=>r(g.scene),null,j)).then(s=>{UMP45_MODEL   =s;}); return _ump45LoadPromise;   }
 function preloadBeretta() { if (_berettaLoadPromise) return _berettaLoadPromise; const l=new GLTFLoader(); _berettaLoadPromise = new Promise((r,j)=>l.load('/weapons/beretta/scene.gltf',g=>r(g.scene),null,j)).then(s=>{BERETTA_MODEL =s;}); return _berettaLoadPromise; }
 function preloadIzh27()   { if (_izh27LoadPromise)   return _izh27LoadPromise;   const l=new GLTFLoader(); _izh27LoadPromise   = new Promise((r,j)=>l.load('/weapons/izh27/scene.gltf',  g=>r(g.scene),null,j)).then(s=>{IZH27_MODEL   =s;}); return _izh27LoadPromise;   }
-function preloadSpas12()  { if (_spas12LoadPromise)  return _spas12LoadPromise;  const l=new GLTFLoader(); _spas12LoadPromise  = new Promise((r,j)=>l.load('/weapons/spas12/scene.gltf', g=>r(g.scene),null,j)).then(s=>{SPAS12_MODEL  =s;}); return _spas12LoadPromise;  }
+function preloadSpas12()  { if (_spas12LoadPromise)  return _spas12LoadPromise;  const l=new GLTFLoader(); _spas12LoadPromise  = new Promise((r,j)=>l.load('/weapons/spas12/scene.gltf', g=>r(g.scene),null,j)).then(s=>{
+    s.traverse(node => {
+      if (!node.isMesh) return;
+      node.material = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.45, metalness: 0.75 });
+    });
+    SPAS12_MODEL = s;
+  }); return _spas12LoadPromise;  }
 preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12();
 
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
