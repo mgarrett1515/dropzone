@@ -100,6 +100,8 @@ let UMP45_MODEL    = null; let _ump45LoadPromise   = null;
 let BERETTA_MODEL  = null; let _berettaLoadPromise = null;
 let IZH27_MODEL    = null; let _izh27LoadPromise   = null;
 let SPAS12_MODEL   = null; let _spas12LoadPromise  = null;
+let BARRETT_MODEL  = null; let _barrettLoadPromise = null;
+let P90_MODEL      = null; let _p90LoadPromise    = null;
 
 function _launchWithErrorCatch(fn) {
   settings.gamertag = (document.getElementById('gamertagInput').value.trim().toUpperCase() || 'PLAYER');
@@ -206,7 +208,21 @@ function preloadSpas12()  { if (_spas12LoadPromise)  return _spas12LoadPromise; 
     });
     SPAS12_MODEL = s;
   }); return _spas12LoadPromise;  }
-preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12();
+function preloadBarrett() {
+  if (_barrettLoadPromise) return _barrettLoadPromise;
+  const l = new GLTFLoader();
+  _barrettLoadPromise = new Promise((r, j) => l.load('/weapons/barrett/scene.glb', g => r(g.scene), null, j))
+    .then(s => { BARRETT_MODEL = s; });
+  return _barrettLoadPromise;
+}
+function preloadP90() {
+  if (_p90LoadPromise) return _p90LoadPromise;
+  const l = new GLTFLoader();
+  _p90LoadPromise = new Promise((r, j) => l.load('/weapons/p90/scene.glb', g => r(g.scene), null, j))
+    .then(s => { P90_MODEL = s; });
+  return _p90LoadPromise;
+}
+preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90();
 
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
@@ -4047,6 +4063,16 @@ function buildAK(group, attach) {
 
 // ── FN P90 ────────────────────────────────────────────────────────────────────
 function buildP90(group, attach) {
+  if (P90_MODEL && _gltfGun(P90_MODEL, group, 0.94, 0, Math.PI, 0, 0.04, -0.10, -0.30)) {
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.008, -0.480);
+    group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.080, -0.20);
+    buildHands(group, -0.080, -0.434, false);
+    mergeGunGroup(group);
+    return group;
+  }
+  // procedural fallback
+  if (false) {
   const PL=VM_MATS.polymer(), BL=VM_MATS.black(),
         M=VM_MATS.metal(), DK=VM_MATS.darkmetal();
   const TR=new THREE.MeshStandardMaterial({color:0x3a5a3a,roughness:0.25,metalness:0.05,transparent:true,opacity:0.62});
@@ -4121,6 +4147,7 @@ function buildP90(group, attach) {
   group.userData.adsPos=new THREE.Vector3(0,-0.095,-0.30);
   buildHands(group,-0.080,-0.434,false);
   mergeGunGroup(group);
+  } // end procedural fallback
 }
 
 // ── SPAS-12 ───────────────────────────────────────────────────────────────────
@@ -4139,6 +4166,16 @@ function buildSPAS(group, attach) {
 
 // ── Barrett M82 ───────────────────────────────────────────────────────────────
 function buildBarrett(group, attach) {
+  if (BARRETT_MODEL && _gltfGun(BARRETT_MODEL, group, 1.90, 0, Math.PI, 0, 0.04, -0.10, -0.45)) {
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.034, -1.868);
+    group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
+    group.userData.adsPos    = new THREE.Vector3(-0.0405, -0.028, -0.26);
+    buildHands(group, -0.060, -0.514, false);
+    mergeGunGroup(group);
+    return group;
+  }
+  // procedural fallback
+  if (false) {
   const FL=new THREE.MeshStandardMaterial({color:0x262626,roughness:0.82,metalness:0.14});
   const B=VM_MATS.bluedSteel(), BL=VM_MATS.black(),
         PL=VM_MATS.polymer(), DK=VM_MATS.darkmetal(), M=VM_MATS.metal();
@@ -4243,6 +4280,7 @@ function buildBarrett(group, attach) {
   group.userData.adsPos=new THREE.Vector3(0,-0.099,-0.30);
   buildHands(group,-0.060,-0.514,false);
   mergeGunGroup(group);
+  } // end procedural fallback
 }
 
 function buildMachete(group) {
