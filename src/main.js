@@ -3828,7 +3828,7 @@ function buildPistol(group, attach) {
     _gltfGun(BERETTA_MODEL, group, 0.28, 0, Math.PI/2, 0, 0.04, -0.06, -0.22);
     group.userData.barrelTip = new THREE.Vector3(0, 0.024, -0.222);
     group.userData.basePos   = new THREE.Vector3(0.16, -0.18, -0.26);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.066, -0.22);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.035, -0.22);
     buildHands(group, 0.0, -0.05, false);
     mergeGunGroup(group);
     return group;
@@ -3848,7 +3848,7 @@ function buildAR(group, attach) {
     const size0 = new THREE.Vector3();
     bbox0.getSize(size0);
     const naturalLen = Math.max(size0.x, size0.y, size0.z);
-    const scaleFactor = 0.90 / naturalLen;
+    const scaleFactor = 1.35 / naturalLen;
     m4.scale.setScalar(scaleFactor);
 
     // Rotate so barrel faces -Z (camera forward in viewmodel space).
@@ -3867,7 +3867,7 @@ function buildAR(group, attach) {
     group.add(m4);
     group.userData.barrelTip = new THREE.Vector3(0, 0.024, -0.956);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.28);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.10, -0.32);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.0945, -0.32);
     buildHands(group, -0.085, -0.490, attach.grip === 'grip');
     mergeGunGroup(group); // only merges direct Mesh children (hands), GLTF sub-tree is a Group so it's skipped
     return group;
@@ -3876,10 +3876,10 @@ function buildAR(group, attach) {
 
 // ── HK UMP-45 ─────────────────────────────────────────────────────────────────
 function buildSMG(group, attach) {
-  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.043, Math.PI/2, 0, 0, 0.04, -0.16, -0.50)) {
+  if (UMP45_MODEL && _gltfGun(UMP45_MODEL, group, 0.086, Math.PI/2, 0, 0, 0.04, -0.16, -0.50)) {
     group.userData.barrelTip = new THREE.Vector3(0, 0.012, -0.548);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.067, -0.24);
+    group.userData.adsPos    = new THREE.Vector3(-0.0635, -0.079, -0.24);
     buildHands(group, -0.085, -0.390, attach.grip === 'grip');
     mergeGunGroup(group);
     return group;
@@ -3890,10 +3890,10 @@ function buildSMG(group, attach) {
 function buildSniper(group, attach) {
   if (KAR98_MODEL) {
     // Barrel already at -Z in world space after Sketchfab root — no rotation needed
-    _gltfGun(KAR98_MODEL, group, 0.95, 0, 0, 0, 0.04, -0.10, -0.45);
+    _gltfGun(KAR98_MODEL, group, 1.90, 0, 0, 0, 0.04, -0.10, -0.45);
     group.userData.barrelTip = new THREE.Vector3(0, 0.034, -0.934);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.088, -0.30);
+    group.userData.adsPos    = new THREE.Vector3(-0.033, -0.065, -0.30);
     buildHands(group, -0.080, -0.490, false);
     mergeGunGroup(group);
     return group;
@@ -3902,10 +3902,10 @@ function buildSniper(group, attach) {
 
 // ── Over/Under Shotgun (IZH-27 GLTF) ─────────────────────────────────────────
 function buildShotgun(group, attach) {
-  if (IZH27_MODEL && _gltfGun(IZH27_MODEL, group, 0.88, 0, Math.PI, 0, 0.04, -0.10, -0.45)) {
+  if (IZH27_MODEL && _gltfGun(IZH27_MODEL, group, 1.76, 0, Math.PI, 0, 0.04, -0.10, -0.45)) {
     group.userData.barrelTip = new THREE.Vector3(0, 0.056, -0.862);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.082, -0.20);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.051, -0.20);
     buildHands(group, -0.080, -0.354, false);
     mergeGunGroup(group);
     return group;
@@ -4005,7 +4005,7 @@ function buildAK(group, attach) {
     const size0 = new THREE.Vector3();
     bbox0.getSize(size0);
     const naturalLen = Math.max(size0.x, size0.y, size0.z);
-    ak.scale.setScalar(0.90 / naturalLen);
+    ak.scale.setScalar(1.35 / naturalLen);
 
     // Barrel already at -Z in world space after Sketchfab root — no rotation needed.
     ak.rotation.set(0, 0, 0);
@@ -4019,7 +4019,7 @@ function buildAK(group, attach) {
     group.add(ak);
     group.userData.barrelTip = new THREE.Vector3(0, 0.028, -0.802);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.28);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.077, -0.30);
+    group.userData.adsPos    = new THREE.Vector3(-0.027, -0.099, -0.30);
     buildHands(group, -0.080, -0.490, false);
     mergeGunGroup(group);
     return group;
@@ -4108,10 +4108,10 @@ function buildP90(group, attach) {
 function buildSPAS(group, attach) {
   if (SPAS12_MODEL) {
     // SPAS-12: barrel at +X in world space → Ry(+90°) maps +X → -Z (forward)
-    _gltfGun(SPAS12_MODEL, group, 0.78, 0, Math.PI/2, 0, 0.04, -0.10, -0.42);
+    _gltfGun(SPAS12_MODEL, group, 1.56, 0, Math.PI/2, 0, 0.04, -0.10, -0.42);
     group.userData.barrelTip = new THREE.Vector3(0, 0.028, -0.716);
     group.userData.basePos   = new THREE.Vector3(0.18, -0.20, -0.26);
-    group.userData.adsPos    = new THREE.Vector3(0,    -0.055, -0.25);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.024, -0.25);
     buildHands(group, -0.080, -0.490, false);
     mergeGunGroup(group);
     return group;
