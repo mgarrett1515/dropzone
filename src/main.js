@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -106,14 +106,40 @@ let BAT_MODEL      = null; let _batLoadPromise    = null;
 let CROWBAR_MODEL  = null; let _crowbarLoadPromise= null;
 let BARRETT_MODEL  = null; let _barrettLoadPromise = null;
 let P90_MODEL      = null; let _p90LoadPromise    = null;
-let TESLA_MODEL      = null; let _teslaLoadPromise      = null;
-let LOWPOLYCAR_MODEL = null; let _lowpolycarLoadPromise = null;
+let LOWPOLYCAR_MODEL     = null; let _lowpolycarLoadPromise     = null;
+let TOYOTA_MODEL         = null; let _toyotaLoadPromise         = null;
+let RACECAR_MODEL        = null; let _racecarLoadPromise        = null;
+let FREELOWPOLY_MODEL    = null; let _freelowpolyLoadPromise    = null;
+let VAN_MODEL            = null; let _vanLoadPromise            = null;
+let MUSCLECAR_MODEL      = null; let _musclecarLoadPromise      = null;
+let AMMOBOX_MODEL        = null; let _ammoboxLoadPromise        = null;
+let MEDKIT_MODEL         = null; let _medkitLoadPromise         = null;
+let BANDAGE_MODEL        = null; let _bandageLoadPromise        = null;
+let REDDOT_SIGHT_MODEL   = null; let _reddotSightLoadPromise   = null;
+let SCOPE2X_MODEL        = null; let _scope2xLoadPromise        = null;
+let ACOG_MODEL           = null; let _acogLoadPromise           = null;
+let SCOPE8X_MODEL        = null; let _scope8xLoadPromise        = null;
+let HOLO_MODEL           = null; let _holoLoadPromise           = null;
+let EXTMAG_MODEL         = null; let _extmagLoadPromise         = null;
+let GRIP_MODEL           = null; let _gripLoadPromise           = null;
+let COMP_MODEL           = null; let _compLoadPromise           = null;
+let SILENCER_MODEL       = null; let _silencerModelLoadPromise  = null;
+
+// Terrain height cache — rawTerrainNoise is expensive; cache at 1m resolution
+const _terrainNoiseCache = new Map();
+// Pre-allocated scratch Vector3s — reused in hot paths to avoid GC churn
+const _sv0=new THREE.Vector3(),_sv1=new THREE.Vector3(),_sv2=new THREE.Vector3();
+const _sv3=new THREE.Vector3(),_sv4=new THREE.Vector3(),_sv5=new THREE.Vector3();
+const _sv6=new THREE.Vector3(),_losCheckVec=new THREE.Vector3();
 
 function _launchWithErrorCatch(fn) {
   settings.gamertag = (document.getElementById('gamertagInput').value.trim().toUpperCase() || 'PLAYER');
   document.getElementById('menu').style.display = 'none';
   document.getElementById('clickHint').style.display = 'flex';
+  const _ls = document.getElementById('loadingScreen');
+  if (_ls) _ls.style.display = 'flex';
   function showError(err) {
+    if (_ls) _ls.style.display = 'none';
     console.error('Game failed to start:', err);
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#100;color:#fff;padding:30px;font-family:monospace;font-size:13px;overflow:auto;white-space:pre-wrap;';
@@ -238,9 +264,25 @@ function preloadDeagle() {
 function preloadKnife()   { if (_knifeLoadPromise)   return _knifeLoadPromise;   const l=new GLTFLoader(); _knifeLoadPromise   = new Promise((r,j)=>l.load('/weapons/knife/scene.glb',        g=>r(g.scene),null,j)).then(s=>{KNIFE_MODEL   =s;}); return _knifeLoadPromise;   }
 function preloadBat()     { if (_batLoadPromise)     return _batLoadPromise;     const l=new GLTFLoader(); _batLoadPromise     = new Promise((r,j)=>l.load('/weapons/baseball_bat/scene.glb', g=>r(g.scene),null,j)).then(s=>{BAT_MODEL     =s;}); return _batLoadPromise;     }
 function preloadCrowbar() { if (_crowbarLoadPromise) return _crowbarLoadPromise; const l=new GLTFLoader(); _crowbarLoadPromise = new Promise((r,j)=>l.load('/weapons/crowbar/scene.glb',     g=>r(g.scene),null,j)).then(s=>{CROWBAR_MODEL =s;}); return _crowbarLoadPromise; }
-function preloadTesla() { if (_teslaLoadPromise) return _teslaLoadPromise; const l=new GLTFLoader(); _teslaLoadPromise = new Promise((r,j)=>l.load('/vehicles/tesla.glb', g=>r(g.scene),null,j)).then(s=>{TESLA_MODEL=s;}); return _teslaLoadPromise; }
 function preloadLowPolyCar() { if (_lowpolycarLoadPromise) return _lowpolycarLoadPromise; const l=new GLTFLoader(); _lowpolycarLoadPromise = new Promise((r,j)=>l.load('/vehicles/lowpolycar.glb', g=>r(g.scene),null,j)).then(s=>{LOWPOLYCAR_MODEL=s;}); return _lowpolycarLoadPromise; }
-preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadTesla(); preloadLowPolyCar();
+function preloadToyota()     { if (_toyotaLoadPromise)      return _toyotaLoadPromise;     const l=new GLTFLoader(); _toyotaLoadPromise     = new Promise((r,j)=>l.load('/vehicles/low_poly_car_toyota.glb',           g=>r(g.scene),null,j)).then(s=>{TOYOTA_MODEL=s;});      return _toyotaLoadPromise;     }
+function preloadRacecar()    { if (_racecarLoadPromise)     return _racecarLoadPromise;    const l=new GLTFLoader(); _racecarLoadPromise    = new Promise((r,j)=>l.load('/vehicles/compact_race_car.glb',               g=>r(g.scene),null,j)).then(s=>{RACECAR_MODEL=s;});     return _racecarLoadPromise;    }
+function preloadFreeLowPoly(){ if (_freelowpolyLoadPromise) return _freelowpolyLoadPromise; const l=new GLTFLoader(); _freelowpolyLoadPromise = new Promise((r,j)=>l.load('/vehicles/free_low_poly_car.glb',              g=>r(g.scene),null,j)).then(s=>{FREELOWPOLY_MODEL=s;}); return _freelowpolyLoadPromise; }
+function preloadVan()        { if (_vanLoadPromise)         return _vanLoadPromise;        const l=new GLTFLoader(); _vanLoadPromise        = new Promise((r,j)=>l.load('/vehicles/low_poly_car_toyota_toyoace_van.glb', g=>r(g.scene),null,j)).then(s=>{VAN_MODEL=s;});        return _vanLoadPromise;        }
+function preloadMuscleCar()  { if (_musclecarLoadPromise)   return _musclecarLoadPromise;  const l=new GLTFLoader(); _musclecarLoadPromise  = new Promise((r,j)=>l.load('/vehicles/classic_muscle_car.glb',            g=>r(g.scene),null,j)).then(s=>{MUSCLECAR_MODEL=s;});  return _musclecarLoadPromise;  }
+function preloadAmmoBox()    { if (_ammoboxLoadPromise)     return _ammoboxLoadPromise;    const l=new GLTFLoader(); _ammoboxLoadPromise    = new Promise((r,j)=>l.load('/ammo_box.glb',     g=>r(g.scene),null,j)).then(s=>{AMMOBOX_MODEL=s;});    return _ammoboxLoadPromise;    }
+function preloadMedkit()     { if (_medkitLoadPromise)      return _medkitLoadPromise;     const l=new GLTFLoader(); _medkitLoadPromise     = new Promise((r,j)=>l.load('/med_kit_red.glb',  g=>r(g.scene),null,j)).then(s=>{MEDKIT_MODEL=s;});     return _medkitLoadPromise;     }
+function preloadBandage()    { if (_bandageLoadPromise)     return _bandageLoadPromise;    const l=new GLTFLoader(); _bandageLoadPromise    = new Promise((r,j)=>l.load('/bandage_roll.glb', g=>r(g.scene),null,j)).then(s=>{BANDAGE_MODEL=s;});    return _bandageLoadPromise;    }
+function preloadReddotSight(){ if (_reddotSightLoadPromise) return _reddotSightLoadPromise; const l=new GLTFLoader(); _reddotSightLoadPromise = new Promise((r,j)=>l.load('/sights/red_dot.glb',                        g=>r(g.scene),null,j)).then(s=>{REDDOT_SIGHT_MODEL=s;}); return _reddotSightLoadPromise; }
+function preloadScope2x()    { if (_scope2xLoadPromise)     return _scope2xLoadPromise;    const l=new GLTFLoader(); _scope2xLoadPromise    = new Promise((r,j)=>l.load('/sights/2x_scope.glb',                        g=>r(g.scene),null,j)).then(s=>{SCOPE2X_MODEL=s;});    return _scope2xLoadPromise;    }
+function preloadAcog()       { if (_acogLoadPromise)        return _acogLoadPromise;       const l=new GLTFLoader(); _acogLoadPromise       = new Promise((r,j)=>l.load('/sights/sight_acog.glb',                       g=>r(g.scene),null,j)).then(s=>{ACOG_MODEL=s;});       return _acogLoadPromise;       }
+function preloadScope8x()    { if (_scope8xLoadPromise)     return _scope8xLoadPromise;    const l=new GLTFLoader(); _scope8xLoadPromise    = new Promise((r,j)=>l.load('/sights/8x_scope_with_balap.glb',             g=>r(g.scene),null,j)).then(s=>{SCOPE8X_MODEL=s;});    return _scope8xLoadPromise;    }
+function preloadHolo()       { if (_holoLoadPromise)        return _holoLoadPromise;       const l=new GLTFLoader(); _holoLoadPromise       = new Promise((r,j)=>l.load('/sights/holographic_sight_game_model.glb', g=>r(g.scene),null,j)).then(s=>{HOLO_MODEL=s;});       return _holoLoadPromise;       }
+function preloadExtmag()     { if (_extmagLoadPromise)      return _extmagLoadPromise;     const l=new GLTFLoader(); _extmagLoadPromise     = new Promise((r,j)=>l.load('/sights/60_rounds_ak_magazine.glb',   g=>r(g.scene),null,j)).then(s=>{EXTMAG_MODEL=s;});     return _extmagLoadPromise;     }
+function preloadGrip()       { if (_gripLoadPromise)        return _gripLoadPromise;       const l=new GLTFLoader(); _gripLoadPromise       = new Promise((r,j)=>l.load('/sights/low-poly_magpul_rvg.glb',      g=>r(g.scene),null,j)).then(s=>{GRIP_MODEL=s;});       return _gripLoadPromise;       }
+function preloadComp()       { if (_compLoadPromise)        return _compLoadPromise;       const l=new GLTFLoader(); _compLoadPromise       = new Promise((r,j)=>l.load('/sights/compensator.glb',              g=>r(g.scene),null,j)).then(s=>{COMP_MODEL=s;});       return _compLoadPromise;       }
+function preloadSilencerMdl(){ if (_silencerModelLoadPromise) return _silencerModelLoadPromise; const l=new GLTFLoader(); _silencerModelLoadPromise = new Promise((r,j)=>l.load('/sights/makarov_pistol_silencer.glb', g=>r(g.scene),null,j)).then(s=>{SILENCER_MODEL=s;}); return _silencerModelLoadPromise; }
+preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadLowPolyCar(); preloadToyota(); preloadRacecar(); preloadFreeLowPoly(); preloadVan(); preloadMuscleCar(); preloadAmmoBox(); preloadMedkit(); preloadBandage(); preloadReddotSight(); preloadScope2x(); preloadAcog(); preloadScope8x(); preloadHolo(); preloadExtmag(); preloadGrip(); preloadComp(); preloadSilencerMdl();
 
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
@@ -287,6 +329,7 @@ const WEAPONS = {
 };
 const ATTACHMENTS = {
   reddot:   { name:'RED DOT',   type:'scope', zoom:1.3 },
+  holo:     { name:'HOLO SIGHT', type:'scope', zoom:1.5 },
   scope2x:  { name:'2x SCOPE',  type:'scope', zoom:2.2 },
   scope4x:  { name:'4x SCOPE',  type:'scope', zoom:4.0 },
   scope8x:  { name:'8x SCOPE',  type:'scope', zoom:8.0 },
@@ -313,9 +356,8 @@ async function startGame() {
 
   renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
+  renderer.shadowMap.enabled = false; // disabled — no objects cast shadows in our setup
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.body.appendChild(renderer.domElement);
   clock = new THREE.Clock();
@@ -345,9 +387,7 @@ async function startGame() {
   const tc = TOD[tod];
 
   renderer.toneMappingExposure = tc.exposure;
-  const pmremGen = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmremGen.fromScene(new RoomEnvironment(), 0.04).texture;
-  pmremGen.dispose();
+  // PMREM environment removed — major per-fragment cost reduction
   setupComposer(innerWidth, innerHeight);
 
   buildSky(tc);
@@ -356,9 +396,9 @@ async function startGame() {
   const sun = new THREE.DirectionalLight(tc.sunColor, tc.sunInt);
   sun.position.set(...tc.sunPos);
   sun.castShadow = true;
-  sun.shadow.mapSize.width = 2048;
-  sun.shadow.mapSize.height = 2048;
-  const sd = 110;
+  sun.shadow.mapSize.width = 512;
+  sun.shadow.mapSize.height = 512;
+  const sd = 50;
   sun.shadow.camera.left = -sd; sun.shadow.camera.right = sd;
   sun.shadow.camera.top = sd; sun.shadow.camera.bottom = -sd;
   sun.shadow.camera.near = 10;
@@ -380,18 +420,65 @@ async function startGame() {
   const hemi = new THREE.HemisphereLight(tc.hemiSky, tc.hemiGnd, tc.hemiInt);
   scene.add(hemi);
 
-  const fill = new THREE.DirectionalLight(tc.fillColor, tc.fillInt);
-  fill.position.set(-80, 60, -60);
-  scene.add(fill);
-
+  // fill light removed for shader simplicity
   scene.add(new THREE.AmbientLight(tc.ambColor, tc.ambInt));
 
   scene.fog = new THREE.FogExp2(tc.fogColor, tc.fogDensity);
 
-  await Promise.all([preloadNature(), preloadM4(), preloadAK(),
-    preloadKar98(), preloadUmp45(), preloadBeretta(), preloadIzh27(), preloadSpas12()]);
-  // Pre-warm the GLTF gun flat-cache during loading so first pickup has no spike.
-  // Calling each build function bakes and caches the final positioned mesh group.
+  // Full progress-tracked preload — shows loading bar before game init
+  const _loadBar   = document.getElementById('loadingBar');
+  const _loadLabel = document.getElementById('loadingLabel');
+  const _loadCount = document.getElementById('loadingCount');
+  const _allPreloads = [
+    ['TREES & PROPS', preloadNature],
+    ['M4A1',          preloadM4],
+    ['AK-47',         preloadAK],
+    ['KAR98',         preloadKar98],
+    ['UMP-45',        preloadUmp45],
+    ['BERETTA',       preloadBeretta],
+    ['IZH-27',        preloadIzh27],
+    ['SPAS-12',       preloadSpas12],
+    ['BARRETT .50',   preloadBarrett],
+    ['P90',           preloadP90],
+    ['DEAGLE',        preloadDeagle],
+    ['KNIFE',         preloadKnife],
+    ['BAT',           preloadBat],
+    ['CROWBAR',       preloadCrowbar],
+    ['VEHICLES',      preloadLowPolyCar],
+    ['VEHICLES',      preloadToyota],
+    ['VEHICLES',      preloadRacecar],
+    ['VEHICLES',      preloadFreeLowPoly],
+    ['VEHICLES',      preloadVan],
+    ['VEHICLES',      preloadMuscleCar],
+    ['SUPPLIES',      preloadAmmoBox],
+    ['SUPPLIES',      preloadMedkit],
+    ['SUPPLIES',      preloadBandage],
+    ['SIGHTS',        preloadReddotSight],
+    ['SIGHTS',        preloadScope2x],
+    ['SIGHTS',        preloadAcog],
+    ['SIGHTS',        preloadScope8x],
+    ['SIGHTS',        preloadHolo],
+    ['ATTACHMENTS',   preloadExtmag],
+    ['ATTACHMENTS',   preloadGrip],
+    ['ATTACHMENTS',   preloadComp],
+    ['ATTACHMENTS',   preloadSilencerMdl],
+  ];
+  let _loadedN = 0;
+  const _loadTotal = _allPreloads.length;
+  await Promise.all(_allPreloads.map(([lbl, fn]) => fn().then(() => {
+    _loadedN++;
+    if (_loadBar)   _loadBar.style.width   = Math.round(_loadedN / _loadTotal * 100) + '%';
+    if (_loadLabel) _loadLabel.textContent = lbl + '...';
+    if (_loadCount) _loadCount.textContent = _loadedN + ' / ' + _loadTotal;
+  }).catch(() => {
+    _loadedN++;
+    if (_loadBar)   _loadBar.style.width   = Math.round(_loadedN / _loadTotal * 100) + '%';
+    if (_loadCount) _loadCount.textContent = _loadedN + ' / ' + _loadTotal;
+  })));
+  // ── Phase 2: world build while loading screen stays visible ────────────
+  if (_loadLabel) _loadLabel.textContent = 'WARMING UP...';
+  await new Promise(r => setTimeout(r, 20));
+  // Pre-warm the GLTF gun flat-cache so first pickup has no spike.
   const _pw = new THREE.Group();
   if (BERETTA_MODEL) buildPistol(_pw, {});
   if (UMP45_MODEL)   buildSMG(_pw, {});
@@ -402,11 +489,18 @@ async function startGame() {
     if (o.geometry && !o.userData.fromBaked) o.geometry.dispose();
     if (o.material && !o.userData.fromBaked) o.material.dispose();
   });
+  if (_loadLabel) _loadLabel.textContent = 'GENERATING TERRAIN...';
+  await new Promise(r => setTimeout(r, 16));
   buildWorld();
+  _buildCollisionCache();
+  if (_loadLabel) _loadLabel.textContent = 'SPAWNING PLAYERS...';
+  await new Promise(r => setTimeout(r, 16));
   spawnPlayer();
   buildMuzzleFlash();
   buildViewmodel();
   spawnBots(settings.bots);
+  if (_loadLabel) _loadLabel.textContent = 'INITIALIZING MATCH...';
+  await new Promise(r => setTimeout(r, 16));
   // Populate all containers with loot
   for (const obj of searchableObjects) {
     obj.items = generateContainerLoot(obj.type);
@@ -433,6 +527,11 @@ async function startGame() {
       }, { once: true });
     } catch(e) {}
   }, 2000); // wait 2s after game start so other sounds decode first
+  // All init done — hide loading screen and start
+  if (_loadLabel) _loadLabel.textContent = 'READY';
+  await new Promise(r => setTimeout(r, 50));
+  const _lsDone = document.getElementById('loadingScreen');
+  if (_lsDone) _lsDone.style.display = 'none';
   window.addEventListener('resize', onResize);
   animate();
 }
@@ -449,291 +548,201 @@ async function startRange() {
 
   renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
+  renderer.shadowMap.enabled = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
-  const pmremGenR = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmremGenR.fromScene(new RoomEnvironment(), 0.04).texture;
-  pmremGenR.dispose();
+  // PMREM environment removed for range — major per-fragment cost reduction
   setupComposer(innerWidth, innerHeight);
   clock = new THREE.Clock();
   globalThis._timeOfDay = 2;
 
-  // ── Dimensions ─────────────────────────────────────────────────────────────
+  // ── OUTDOOR RANGE ─────────────────────────────────────────────────────────
   const LANES    = 8;
-  const LANE_W   = 6.0;
-  const ROOM_W   = LANES * LANE_W;   // 48m wide
-  const ROOM_D   = 70;               // 70m deep
-  const ROOM_H   = 4.0;              // ceiling height
-  const BOOTH_D  = 3.5;              // booth depth (at back wall)
-  const BOOTH_H  = 2.8;              // booth height
-  const BENCH_H  = 1.0;
+  const LANE_W   = 5.0;
+  const ROOM_W   = LANES * LANE_W;   // 40m wide
+  const CANOPY_Z = -12;              // back of canopy
+  const SHOOTER_Z = -8;             // player spawn
+  const counterY = 0.92;
+  const frontZ   = SHOOTER_Z + 2.5; // front post line / shooting line
 
-  const SHOOTER_Z = -ROOM_D / 2;     // back wall (booths)
-  const TARGET_Z  =  ROOM_D / 2;     // front wall (targets)
-  // Target sits 3m from front wall
-  const TGT_Z     = TARGET_Z - 3.0;
+  // Sky + fog
+  scene.background = new THREE.Color(0x7ab8d8);
+  scene.fog = new THREE.FogExp2(0x9fd0e8, 0.004);
 
-  // ── Materials ──────────────────────────────────────────────────────────────
-  const mConc   = new THREE.MeshStandardMaterial({ color:0x7e7e86, roughness:0.95, metalness:0.02 });
-  const mConcDk = new THREE.MeshStandardMaterial({ color:0x424248, roughness:0.96, metalness:0.02 });
-  const mCeil   = new THREE.MeshStandardMaterial({ color:0x505058, roughness:0.92, metalness:0.02 });
-  const mSteel  = new THREE.MeshStandardMaterial({ color:0x1c1c22, roughness:0.38, metalness:0.88 });
-  const mSteelL = new THREE.MeshStandardMaterial({ color:0x606068, roughness:0.28, metalness:0.92 });
-  const mRubber = new THREE.MeshStandardMaterial({ color:0x0e0e10, roughness:0.99, metalness:0.00 });
-  const mBench  = new THREE.MeshStandardMaterial({ color:0x1a1a1e, roughness:0.88, metalness:0.05 });
-  const mYellow = new THREE.MeshStandardMaterial({ color:0xf0c000, emissive:0x604800, emissiveIntensity:0.5 });
-  const mLED    = new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0xfff0d0, emissiveIntensity:1.5 });
-  const mAccent = new THREE.MeshStandardMaterial({ color:0xff5028, emissive:0x801800, emissiveIntensity:0.4 });
-  const mShelf  = new THREE.MeshStandardMaterial({ color:0x141418, roughness:0.75, metalness:0.35 });
-  const mGlass  = new THREE.MeshStandardMaterial({ color:0x203040, roughness:0.05, metalness:0.10, transparent:true, opacity:0.30 });
-  const mBoothW = new THREE.MeshStandardMaterial({ color:0x2e2e36, roughness:0.85, metalness:0.05 }); // booth walls
-  // Target
-  const mPaper  = new THREE.MeshStandardMaterial({ color:0xf0ead8, roughness:0.90 });
-  const mRBlk   = new THREE.MeshStandardMaterial({ color:0x141414, roughness:0.85 });
-  const mRGry   = new THREE.MeshStandardMaterial({ color:0x585858, roughness:0.85 });
-  const mRWht   = new THREE.MeshStandardMaterial({ color:0xd0d0d0, roughness:0.85 });
-  const mRRed   = new THREE.MeshStandardMaterial({ color:0xcc2010, roughness:0.80 });
-  const mROrg   = new THREE.MeshStandardMaterial({ color:0xff5808, roughness:0.72, emissive:0x601800, emissiveIntensity:0.18 });
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-  function add(geo, mat, x, y, z, rx=0, ry=0, rz=0) {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x,y,z);
-    if (rx||ry||rz) m.rotation.set(rx,ry,rz);
-    m.castShadow=true; m.receiveShadow=true;
-    scene.add(m); return m;
-  }
-  const B = (w,h,d) => new THREE.BoxGeometry(w,h,d);
-
-  // ── FLOOR ─────────────────────────────────────────────────────────────────
-  // Plain polished concrete with lane lines baked in
-  const flGeo = new THREE.PlaneGeometry(ROOM_W+2, ROOM_D+2, ROOM_W*2, ROOM_D*2);
-  flGeo.rotateX(-Math.PI/2);
-  const fPos = flGeo.attributes.position;
-  const fCol = new Float32Array(fPos.count * 3);
-  for (let i = 0; i < fPos.count; i++) {
-    const fx = fPos.getX(i), fz = fPos.getZ(i);
-    // Concrete base
-    let v = 0.30 + (Math.sin(fx*3.1+0.5)*Math.cos(fz*2.9+1.2)) * 0.02;
-    // Lane stripe lines (thin black lines at each lane boundary)
-    for (let l = 0; l <= LANES; l++) {
-      if (Math.abs(fx - (-ROOM_W/2 + l*LANE_W)) < 0.055) { v = 0.10; }
-    }
-    // Yellow safety line at front of booths
-    if (Math.abs(fz - (SHOOTER_Z + BOOTH_D + 0.12)) < 0.07) v = 0.88;
-    fCol[i*3]=v; fCol[i*3+1]=v; fCol[i*3+2]=v+0.025;
-  }
-  flGeo.setAttribute('color', new THREE.BufferAttribute(fCol, 3));
-  const flMesh = new THREE.Mesh(flGeo, new THREE.MeshStandardMaterial({
-    vertexColors:true, roughness:0.78, metalness:0.07
-  }));
-  flMesh.receiveShadow=true; flMesh.userData.isGround=true; scene.add(flMesh);
-  world = { ground:flMesh, cityCenter:new THREE.Vector2(9999,9999), cityRadius:1, cityBaseY:0 };
-
-  // ── CEILING ────────────────────────────────────────────────────────────────
-  add(B(ROOM_W+2,0.35,ROOM_D+2), mCeil, 0, ROOM_H+0.175, 0);
-
-  // ── OUTER WALLS ────────────────────────────────────────────────────────────
-  add(B(ROOM_W+2,ROOM_H,0.4), mConcDk, 0, ROOM_H/2,  TARGET_Z+0.2);  // far wall
-  add(B(ROOM_W+2,ROOM_H,0.4), mConc,   0, ROOM_H/2,  SHOOTER_Z-0.2); // back wall
-  add(B(0.4,ROOM_H,ROOM_D+2), mConc,  -ROOM_W/2-0.2, ROOM_H/2, 0);   // left
-  add(B(0.4,ROOM_H,ROOM_D+2), mConc,   ROOM_W/2+0.2, ROOM_H/2, 0);   // right
-  // Baseboard accent
-  add(B(0.06,0.15,ROOM_D), mAccent, -ROOM_W/2-0.05, 0.075, 0);
-  add(B(0.06,0.15,ROOM_D), mAccent,  ROOM_W/2+0.05, 0.075, 0);
-
-  // ── CEILING STRUCTURE ─────────────────────────────────────────────────────
-  // Longitudinal I-beams over each lane boundary
-  for (let l = 0; l <= LANES; l++) {
-    const bx = -ROOM_W/2 + l*LANE_W;
-    add(B(0.09,0.26,ROOM_D+1), mSteel,  bx, ROOM_H-0.13, 0);
-    add(B(0.26,0.055,ROOM_D+1), mSteelL, bx, ROOM_H-0.01, 0);
-    add(B(0.26,0.055,ROOM_D+1), mSteelL, bx, ROOM_H-0.26, 0);
-  }
-  // Cross-purlins every 7m
-  for (let z=SHOOTER_Z+5; z<TARGET_Z; z+=7)
-    add(B(ROOM_W+1,0.09,0.10), mSteel, 0, ROOM_H-0.15, z);
-
-  // ── OVERHEAD RAIL per lane ─────────────────────────────────────────────────
-  const RAIL_Y = ROOM_H - 0.52;
-  for (let l = 0; l < LANES; l++) {
-    const lx = -ROOM_W/2 + l*LANE_W + LANE_W/2;
-    const railLen = ROOM_D - 1.0;
-    add(B(0.09,0.055,railLen), mSteel,  lx, RAIL_Y, 0);       // bottom flange
-    add(B(0.055,0.16,railLen), mSteel,  lx, RAIL_Y+0.11, 0);  // web
-    add(B(0.13,0.04,railLen),  mSteelL, lx, RAIL_Y+0.21, 0);  // top flange
-    // Hanging brackets from ceiling beams
-    for (let hz=SHOOTER_Z+5; hz<TARGET_Z; hz+=7)
-      add(B(0.035,0.24,0.035), mSteelL, lx, RAIL_Y+0.33, hz);
-  }
-
-  // ── LED STRIP LIGHTING per lane ────────────────────────────────────────────
-  for (let l = 0; l < LANES; l++) {
-    const lx = -ROOM_W/2 + l*LANE_W + LANE_W/2;
-    for (const ox of [-0.20, 0.20]) {
-      const ls = new THREE.Mesh(B(0.045,0.025,ROOM_D-2), mLED);
-      ls.position.set(lx+ox, ROOM_H-0.30, 0); scene.add(ls);
-    }
-    for (let lz=SHOOTER_Z+4; lz<TARGET_Z; lz+=7) {
-      const pl = new THREE.PointLight(0xfff0d0, 1.0, 16);
-      pl.position.set(lx, ROOM_H-0.34, lz); scene.add(pl);
-    }
-  }
-  scene.add(new THREE.AmbientLight(0xc8d0d8, 0.55));
-  const sun = new THREE.DirectionalLight(0xfff8f0, 0.55);
-  sun.position.set(6,18,-10); sun.castShadow=true;
-  sun.shadow.mapSize.width = sun.shadow.mapSize.height = 1024;
-  sun.shadow.camera.left=sun.shadow.camera.bottom=-40;
-  sun.shadow.camera.right=sun.shadow.camera.top=40;
-  sun.shadow.camera.near=1; sun.shadow.camera.far=100;
+  // Lighting — no shadow maps
+  scene.add(new THREE.AmbientLight(0xd8eaf4, 0.85));
+  const sun = new THREE.DirectionalLight(0xfff5e0, 1.3);
+  sun.position.set(80, 180, -120);
+  sun.castShadow = false;
   scene.add(sun);
-  scene.fog = new THREE.Fog(0x282830, 55, 130);
+  globalThis._sunLight = sun;
 
-  // ── BOOTHS — all joined in a row along the back wall ──────────────────────
-  // Continuous counter top running the full width
-  const counterY = BENCH_H;
-  add(B(ROOM_W+0.2, 0.07, BOOTH_D), mBench, 0, counterY, SHOOTER_Z+BOOTH_D/2); // bench top
-  add(B(ROOM_W+0.2, 0.06, 0.06),    mSteel, 0, counterY+0.065, SHOOTER_Z+0.18); // front lip
-  // Under-counter shelf
-  add(B(ROOM_W+0.2, 0.05, BOOTH_D*0.7), mShelf, 0, 0.55, SHOOTER_Z+BOOTH_D/2+0.1);
-  // Counter legs — pairs across full width
-  for (let l=0; l<=LANES; l++) {
-    const lx=-ROOM_W/2+l*LANE_W;
-    add(B(0.07,counterY,0.07),mSteel,lx,counterY/2,SHOOTER_Z+0.35);
-    add(B(0.07,counterY,0.07),mSteel,lx,counterY/2,SHOOTER_Z+BOOTH_D-0.25);
-    add(B(0.05,0.05,BOOTH_D),mSteel,lx,0.06,SHOOTER_Z+BOOTH_D/2); // foot brace
+  // Materials
+  const mGrass    = new THREE.MeshStandardMaterial({ color: 0x5a7840, roughness: 0.95 });
+  const mDirt     = new THREE.MeshStandardMaterial({ color: 0x8a6a40, roughness: 0.92 });
+  const mSand     = new THREE.MeshStandardMaterial({ color: 0xb89a60, roughness: 0.90 });
+  const mWood     = new THREE.MeshStandardMaterial({ color: 0x9a7550, roughness: 0.85 });
+  const mConcrete = new THREE.MeshStandardMaterial({ color: 0xc2bcb4, roughness: 0.88 });
+  const mMetal    = new THREE.MeshStandardMaterial({ color: 0x5a6868, roughness: 0.55, metalness: 0.45 });
+  const mPostMat  = new THREE.MeshStandardMaterial({ color: 0x2c4438, roughness: 0.65, metalness: 0.35 });
+
+  // Ground (grass)
+  const groundGeo = new THREE.PlaneGeometry(ROOM_W + 120, 520);
+  groundGeo.rotateX(-Math.PI / 2);
+  const groundMesh = new THREE.Mesh(groundGeo, mGrass);
+  groundMesh.userData.isGround = true;
+  scene.add(groundMesh);
+  world = { ground: groundMesh, cityCenter: new THREE.Vector2(9999,9999), cityRadius:1, cityBaseY:0 };
+
+  // Concrete slab under canopy
+  const slabDepth = frontZ - CANOPY_Z + 0.6;
+  const slabMesh = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W+4, 0.14, slabDepth), mConcrete);
+  slabMesh.position.set(0, 0.07, (frontZ + CANOPY_Z) / 2);
+  scene.add(slabMesh);
+
+  // Center concrete walkway downrange
+  const walkway = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 215), mConcrete);
+  walkway.rotateX(-Math.PI / 2);
+  walkway.position.set(0, 0.011, 100);
+  scene.add(walkway);
+
+  // Dirt lanes flanking walkway
+  const dirtL = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W * 0.44, 215), mDirt);
+  dirtL.rotateX(-Math.PI / 2);
+  dirtL.position.set(-(ROOM_W * 0.24 + 0.9), 0.010, 100);
+  scene.add(dirtL);
+  const dirtR = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W * 0.44, 215), mDirt);
+  dirtR.rotateX(-Math.PI / 2);
+  dirtR.position.set(ROOM_W * 0.24 + 0.9, 0.010, 100);
+  scene.add(dirtR);
+
+  // ── Canopy structure ─────────────────────────────────────────────────────
+  const postH = 3.4;
+  const postW = 0.13;
+  for (let i = 0; i <= LANES; i++) {
+    const px = -ROOM_W / 2 + i * LANE_W;
+    for (const pz of [frontZ, CANOPY_Z]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(postW, postH, postW), mPostMat);
+      post.position.set(px, postH / 2, pz);
+      scene.add(post);
+    }
+  }
+  // Top beams (front slightly lower than back for pitched roof)
+  const frontBeam = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W + postW, 0.18, postW), mPostMat);
+  frontBeam.position.set(0, postH - 0.09, frontZ);
+  scene.add(frontBeam);
+  const backBeam = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W + postW, 0.18, postW), mPostMat);
+  backBeam.position.set(0, postH + 0.22, CANOPY_Z);
+  scene.add(backBeam);
+  // Side fascia beams
+  for (const sx of [-ROOM_W / 2, ROOM_W / 2]) {
+    const sBeam = new THREE.Mesh(new THREE.BoxGeometry(postW, 0.14, frontZ - CANOPY_Z + postW), mPostMat);
+    sBeam.position.set(sx, postH + 0.09, (frontZ + CANOPY_Z) / 2);
+    scene.add(sBeam);
+  }
+  // Longitudinal purlins (wood rafters) every 2 lanes
+  for (let i = 0; i <= LANES; i += 2) {
+    const px = -ROOM_W / 2 + i * LANE_W;
+    const rafter = new THREE.Mesh(new THREE.BoxGeometry(postW, 0.11, frontZ - CANOPY_Z + postW), mWood);
+    rafter.position.set(px, postH + 0.18, (frontZ + CANOPY_Z) / 2);
+    scene.add(rafter);
+  }
+  // Metal roof panel (slightly pitched)
+  const roofDepth = frontZ - CANOPY_Z + 1.3;
+  const roofMesh = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W + 0.7, 0.09, roofDepth), mMetal);
+  roofMesh.position.set(0, postH + 0.34, (frontZ + CANOPY_Z) / 2 + 0.1);
+  roofMesh.rotation.x = 0.05;
+  scene.add(roofMesh);
+
+  // ── Individual shooting benches ──────────────────────────────────────────
+  for (let lane = 0; lane < LANES; lane++) {
+    const lx = -ROOM_W / 2 + lane * LANE_W + LANE_W / 2;
+    const bz = SHOOTER_Z + 1.2;
+    const bw = 2.4;
+    // Table top
+    const table = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.06, 0.80), mWood);
+    table.position.set(lx, counterY, bz);
+    scene.add(table);
+    // Two legs
+    for (const lxo of [-bw * 0.38, bw * 0.38]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, counterY, 0.07), mWood);
+      leg.position.set(lx + lxo, counterY / 2, bz);
+      scene.add(leg);
+    }
+    // Seat plank
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.05, 0.32), mWood);
+    seat.position.set(lx, 0.50, bz + 0.58);
+    scene.add(seat);
+    // Lane number plate on front post
+    const numSign = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.24, 0.04), mConcrete);
+    numSign.position.set(lx, 1.12, frontZ - 0.07);
+    scene.add(numSign);
   }
 
-  // Divider panels between booths — only the partial walls from back wall to counter
-  // They do NOT extend down the range — just define the stall at the back
-  for (let l=1; l<LANES; l++) {
-    const dx = -ROOM_W/2 + l*LANE_W;
-    // Lower panel (floor to bench)
-    add(B(0.06,counterY,BOOTH_D),  mRubber, dx, counterY/2, SHOOTER_Z+BOOTH_D/2);
-    // Upper panel (bench to booth ceiling) — partial height glass/frosted
-    add(B(0.05,BOOTH_H-counterY,BOOTH_D), mGlass, dx, counterY+(BOOTH_H-counterY)/2, SHOOTER_Z+BOOTH_D/2);
-    // Cap strip on top
-    add(B(0.10,0.045,BOOTH_D), mSteelL, dx, BOOTH_H+0.02, SHOOTER_Z+BOOTH_D/2);
+  // ── Paper targets at 25m, 50m, 100m, 200m ────────────────────────────────
+  const TARGET_DISTS = [25, 50, 100, 200];
+  const mTgtBlack  = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 });
+  const mTgtOrange = new THREE.MeshStandardMaterial({ color: 0xff3300, roughness: 0.8 });
+  globalThis._rangeTargets = [];
+  for (const dist of TARGET_DISTS) {
+    for (let lane = 0; lane < LANES; lane++) {
+      const tx = -ROOM_W / 2 + lane * LANE_W + LANE_W / 2;
+      // Thin stake post
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.75, 0.05), mWood);
+      post.position.set(tx, 0.875, dist);
+      scene.add(post);
+      // White target face
+      const tMat = new THREE.MeshStandardMaterial({ color: 0xf0eee8, roughness: 0.9 });
+      const tMesh = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.04), tMat);
+      tMesh.position.set(tx, 1.56, dist);
+      tMesh.userData.isRangeTarget = true;
+      tMesh.userData.tMat = tMat;
+      tMesh.userData.dist = dist;
+      scene.add(tMesh);
+      globalThis._rangeTargets.push(tMesh);
+      buildings.push({ userData: { bbox: new THREE.Box3().setFromObject(tMesh), isRangeTarget: true, targetMesh: tMesh } });
+      // Black outer bullseye ring
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.30, 0.042), mTgtBlack);
+      ring.position.set(tx, 1.56, dist + 0.002);
+      scene.add(ring);
+      // Red centre dot
+      const dot = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.10, 0.044), mTgtOrange);
+      dot.position.set(tx, 1.56, dist + 0.003);
+      scene.add(dot);
+    }
   }
 
-  // Booth ceiling — low dropped ceiling over stalls only
-  add(B(ROOM_W+0.1, 0.08, BOOTH_D), mCeil, 0, BOOTH_H+0.04, SHOOTER_Z+BOOTH_D/2);
-  // Recess lights in booth ceiling
-  for (let l=0; l<LANES; l++) {
-    const lx=-ROOM_W/2+l*LANE_W+LANE_W/2;
-    const rl=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.04,16),mLED);
-    rl.position.set(lx,BOOTH_H,SHOOTER_Z+BOOTH_D*0.55); scene.add(rl);
-    const rpl=new THREE.PointLight(0xfff8e8,0.8,5);
-    rpl.position.set(lx,BOOTH_H-0.1,SHOOTER_Z+BOOTH_D*0.55); scene.add(rpl);
-  }
-  // Lane number placard on front face of counter per booth
-  for (let l=0; l<LANES; l++) {
-    const lx=-ROOM_W/2+l*LANE_W+LANE_W/2;
-    add(B(0.30,0.22,0.025),mAccent,lx,counterY-0.04,SHOOTER_Z+0.10);
-  }
-  // Yellow safety line on floor at open end of booth
-  // (already in floor vertex colors above)
-  // Physical strip
-  add(B(ROOM_W,0.014,0.07),mYellow,0,0.007,SHOOTER_Z+BOOTH_D+0.12);
-
-  // Back wall behind booths — pegboard + shelf for guns/attachments
-  const pegW=ROOM_W, pegH=ROOM_H-BOOTH_H-0.12;
-  add(B(pegW,pegH,0.06), new THREE.MeshStandardMaterial({color:0x101014,roughness:0.88}),
-      0, BOOTH_H+pegH/2+0.12, SHOOTER_Z);
-  // Horizontal gun pegs / slots visual
-  for (let row=0; row<3; row++) {
-    const py=BOOTH_H+0.35+row*0.55;
-    add(B(pegW,0.025,0.04),mSteelL,0,py,SHOOTER_Z+0.05);
+  // ── Distance marker bars at each target row ───────────────────────────────
+  for (const dist of TARGET_DISTS) {
+    const col = dist <= 50 ? 0x22aa44 : dist <= 100 ? 0xdd8800 : 0xcc2222;
+    const mMk = new THREE.MeshStandardMaterial({ color: col });
+    const mk = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W + 1, 0.22, 0.06), mMk);
+    mk.position.set(0, 0.11, dist - 0.55);
+    scene.add(mk);
   }
 
-  // ── DISTANCE MARKERS ──────────────────────────────────────────────────────
-  [10,15,20,25,30,40,50,60].forEach(dist => {
-    const lz = SHOOTER_Z + BOOTH_D + dist;
-    add(B(ROOM_W,0.012,0.06),mYellow,0,0.006,lz);
-    add(B(0.12,0.35,0.06),mSteelL,-ROOM_W/2+0.25,0.175,lz);
-    add(B(0.12,0.35,0.06),mSteelL, ROOM_W/2-0.25,0.175,lz);
-  });
+  // ── Earth backstop berm ───────────────────────────────────────────────────
+  const bsMesh = new THREE.Mesh(new THREE.BoxGeometry(ROOM_W + 24, 7, 10), mSand);
+  bsMesh.position.set(0, 3.5, 220);
+  scene.add(bsMesh);
+  buildings.push({ userData: { bbox: new THREE.Box3().setFromObject(bsMesh) } });
 
-  // ── SINGLE TARGET per lane — one distance (25m from bench) ───────────────
-  const TARGET_DIST = 25; // 25m from the front of the booth
-  const targetRowZ  = SHOOTER_Z + BOOTH_D + TARGET_DIST;
-
-  function makeTarget(cx, cz) {
-    const scale = 0.70;
-    const tY    = 1.80;
-    const fd    = 0.018; // face depth
-    const R     = scale;
-
-    // Paper backer — tan cardboard
-    add(B(R*1.75, R*2.20, fd), mPaper, cx, tY+R*0.08, cz);
-
-    // Concentric ring discs (face-on cylinders)
-    const rings = [
-      { r:R*0.88, mat:mRBlk },
-      { r:R*0.70, mat:mRGry },
-      { r:R*0.52, mat:mRWht },
-      { r:R*0.36, mat:mRRed },
-      { r:R*0.20, mat:mROrg },
-    ];
-    rings.forEach((ring, ri) => {
-      const disc = new THREE.Mesh(
-        new THREE.CylinderGeometry(ring.r, ring.r, fd*0.5, 30),
-        ring.mat
-      );
-      disc.rotation.x = Math.PI/2;
-      disc.position.set(cx, tY, cz+fd*(rings.length-ri)*0.45);
-      scene.add(disc);
-    });
-
-    // Cardboard side clips
-    add(B(0.035,R*2.20,0.035), mSteelL, cx-R*0.90, tY+R*0.08, cz);
-    add(B(0.035,R*2.20,0.035), mSteelL, cx+R*0.90, tY+R*0.08, cz);
-
-    // Hanging wire to rail
-    const wireTop  = RAIL_Y - 0.04;
-    const wireBot  = tY + R*1.20;
-    const wireLen  = wireTop - wireBot;
-    if (wireLen > 0.05)
-      add(B(0.012,wireLen,0.012), mSteel, cx, wireBot+wireLen/2, cz);
-    // Rail clip
-    add(B(0.14,0.06,0.06), mSteelL, cx, RAIL_Y-0.02, cz);
+  // Tree line behind berm
+  const mTrunk = new THREE.MeshStandardMaterial({ color: 0x4a3020, roughness: 0.9 });
+  const mLeaf  = new THREE.MeshStandardMaterial({ color: 0x3a6028, roughness: 0.95 });
+  for (let t = 0; t < 20; t++) {
+    const ttx   = -ROOM_W / 2 - 10 + t * (ROOM_W + 20) / 19;
+    const th    = 3.8 + Math.sin(t * 1.7) * 1.4;
+    const tzOff = Math.sin(t * 2.3) * 2.5;
+    const trunk   = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.22, th, 5), mTrunk);
+    trunk.position.set(ttx, th / 2, 232 + tzOff);
+    scene.add(trunk);
+    const foliage = new THREE.Mesh(new THREE.ConeGeometry(2.4 + Math.sin(t * 1.1) * 0.6, th * 0.9, 6), mLeaf);
+    foliage.position.set(ttx, th * 0.55 + th * 0.42, 232 + tzOff);
+    scene.add(foliage);
   }
-
-  for (let l=0; l<LANES; l++) {
-    const tx = -ROOM_W/2 + l*LANE_W + LANE_W/2;
-    makeTarget(tx, targetRowZ);
-  }
-
-  // ── BULLET TRAP at far wall ───────────────────────────────────────────────
-  add(B(ROOM_W+1,2.2,0.10),mSteel,0,1.1,TARGET_Z-0.22);
-  // Angled deflector baffle
-  const trapGeo=B(ROOM_W+1,0.08,1.4);
-  const trap=new THREE.Mesh(trapGeo,mSteel);
-  trap.position.set(0,1.26,TARGET_Z-0.90); trap.rotation.x=0.45;
-  trap.castShadow=trap.receiveShadow=true; scene.add(trap);
-
-  // ── WEAPONS ON BENCH (all guns, pick up with F) ───────────────────────────
-  const GUN_KEYS=['pistol','deagle','ar','ak','smg','p90','sr','barrett','shotgun','spas','machete','crowbar','bat'];
-  GUN_KEYS.forEach((wk,gi) => {
-    const lane = gi % LANES;
-    const col  = Math.floor(gi/LANES);
-    const lx   = -ROOM_W/2 + lane*LANE_W + LANE_W/2 + (col===0?-0.45:0.45);
-    createLootMesh({type:'weapon',key:wk,name:WEAPONS[wk].name}, lx, SHOOTER_Z+BOOTH_D*0.6, counterY+0.10);
-  });
-
-  // Attachments on bench back edge
-  const ATT_KEYS=['reddot','scope2x','scope4x','scope8x','grip','extmag','comp','silencer'];
-  ATT_KEYS.forEach((ak2,ai) => {
-    const ax=-ROOM_W/2+1.5+ai*(ROOM_W-3)/(ATT_KEYS.length-1);
-    createLootMesh({type:'attachment',key:ak2,name:ATTACHMENTS[ak2].name}, ax, SHOOTER_Z+BOOTH_D-0.6, counterY+0.10);
-  });
-  createLootMesh({type:'heal',key:'medkit', name:'MEDKIT' }, -ROOM_W/2+1.2, SHOOTER_Z+BOOTH_D*0.6, counterY+0.10);
-  createLootMesh({type:'heal',key:'bandage',name:'BANDAGE'}, -ROOM_W/2+2.2, SHOOTER_Z+BOOTH_D*0.6, counterY+0.10);
-
   // ── HUD ──────────────────────────────────────────────────────────────────
   const badge=document.createElement('div');
   badge.style.cssText='position:fixed;top:16px;left:50%;transform:translateX(-50%);font-family:"Bebas Neue",sans-serif;font-size:15px;letter-spacing:5px;color:#ff5028;background:rgba(0,0,0,0.65);padding:4px 18px;z-index:20;pointer-events:none;border:1px solid rgba(255,80,40,0.3);';
@@ -741,8 +750,66 @@ async function startRange() {
   document.body.appendChild(badge);
 
   // ── SPAWN ────────────────────────────────────────────────────────────────
-  await Promise.all([preloadKar98(), preloadUmp45(), preloadBeretta(), preloadIzh27(), preloadSpas12()]);
-  player=new Entity(0, SHOOTER_Z+BOOTH_D*0.5, true);
+  const _lbR=document.getElementById('loadingBar'),_llR=document.getElementById('loadingLabel'),_lcR=document.getElementById('loadingCount');
+  const _rpLoads=[
+    ['TREES & PROPS',preloadNature],
+    ['M4A1',         preloadM4],
+    ['AK-47',        preloadAK],
+    ['KAR98',        preloadKar98],
+    ['UMP-45',       preloadUmp45],
+    ['BERETTA',      preloadBeretta],
+    ['IZH-27',       preloadIzh27],
+    ['SPAS-12',      preloadSpas12],
+    ['BARRETT .50',  preloadBarrett],
+    ['P90',          preloadP90],
+    ['DEAGLE',       preloadDeagle],
+    ['KNIFE',        preloadKnife],
+    ['BAT',          preloadBat],
+    ['CROWBAR',      preloadCrowbar],
+    ['VEHICLES',     preloadLowPolyCar],
+    ['VEHICLES',     preloadToyota],
+    ['VEHICLES',     preloadRacecar],
+    ['VEHICLES',     preloadFreeLowPoly],
+    ['VEHICLES',     preloadVan],
+    ['VEHICLES',     preloadMuscleCar],
+    ['SUPPLIES',     preloadAmmoBox],
+    ['SUPPLIES',     preloadMedkit],
+    ['SUPPLIES',     preloadBandage],
+    ['SIGHTS',       preloadReddotSight],
+    ['SIGHTS',       preloadScope2x],
+    ['SIGHTS',       preloadAcog],
+    ['SIGHTS',       preloadScope8x],
+    ['SIGHTS',       preloadHolo],
+    ['ATTACHMENTS',  preloadExtmag],
+    ['ATTACHMENTS',  preloadGrip],
+    ['ATTACHMENTS',  preloadComp],
+    ['ATTACHMENTS',  preloadSilencerMdl],
+  ];
+  let _rnLoaded=0;
+  await Promise.all(_rpLoads.map(([lbl,fn])=>fn().then(()=>{
+    _rnLoaded++;
+    if(_lbR) _lbR.style.width=Math.round(_rnLoaded/_rpLoads.length*100)+'%';
+    if(_llR) _llR.textContent=lbl+'...';
+    if(_lcR) _lcR.textContent=_rnLoaded+' / '+_rpLoads.length;
+  }).catch(()=>{ _rnLoaded++; if(_lbR) _lbR.style.width=Math.round(_rnLoaded/_rpLoads.length*100)+'%'; })));
+  const _lsR=document.getElementById('loadingScreen');
+  if(_lsR) _lsR.style.display='none';
+  // ── WEAPONS & ATTACHMENTS ON BENCH — placed here so all GLB models are loaded ─
+  const GUN_KEYS=['pistol','deagle','ar','ak','smg','p90','sr','barrett','shotgun','spas','machete','crowbar','bat'];
+  GUN_KEYS.forEach((wk,gi) => {
+    const lane = gi % LANES;
+    const col  = Math.floor(gi/LANES);
+    const lx   = -ROOM_W/2 + lane*LANE_W + LANE_W/2 + (col===0?-0.45:0.45);
+    createLootMesh({type:'weapon',key:wk,name:WEAPONS[wk].name}, lx, SHOOTER_Z+1.2, counterY+0.10);
+  });
+  const ATT_KEYS=['reddot','holo','scope2x','scope4x','scope8x','grip','extmag','comp','silencer'];
+  ATT_KEYS.forEach((ak2,ai) => {
+    const ax=-ROOM_W/2+1.5+ai*(ROOM_W-3)/(ATT_KEYS.length-1);
+    createLootMesh({type:'attachment',key:ak2,name:ATTACHMENTS[ak2].name}, ax, SHOOTER_Z+1.8, counterY+0.10);
+  });
+  createLootMesh({type:'heal',key:'medkit', name:'MEDKIT' }, -ROOM_W/2+1.2, SHOOTER_Z+1.2, counterY+0.10);
+  createLootMesh({type:'heal',key:'bandage',name:'BANDAGE'}, -ROOM_W/2+2.2, SHOOTER_Z+1.2, counterY+0.10);
+  player=new Entity(0, SHOOTER_Z, true);
   player.botName='YOU';
   player.giveWeapon('pistol');
   player.equip(3);
@@ -767,6 +834,7 @@ async function startRange() {
     if (o.geometry && !o.userData.fromBaked) o.geometry.dispose();
     if (o.material && !o.userData.fromBaked) o.material.dispose();
   });
+  _buildCollisionCache();
   buildMuzzleFlash(); buildViewmodel(); setupInput(); preloadAudio();
   window.addEventListener('resize',onResize);
   animate();
@@ -795,7 +863,7 @@ function buildSky(tc) {
   };
   const pal = skyPalettes[globalThis._timeOfDay];
 
-  const skyGeo = new THREE.SphereGeometry(1500, 32, 16);
+  const skyGeo = new THREE.SphereGeometry(1500, 16, 12);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -948,7 +1016,7 @@ function buildWorld() {
   const cityRadius = Math.min(MAP.size * 0.44, 280);
 
   // ----- Ground mesh — higher res, FBM-driven vertex colors -----
-  const SEGS = 200; // more subdivisions = smoother hills
+  const SEGS = 128; // reduced from 200 for performance
   const groundGeo = new THREE.PlaneGeometry(MAP.size*2.4, MAP.size*2.4, SEGS, SEGS);
   groundGeo.rotateX(-Math.PI/2);
   const pos = groundGeo.attributes.position;
@@ -1075,7 +1143,7 @@ function buildWorld() {
 
   groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.90, metalness: 0.0 });
+  const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   ground.userData.isGround = true;
@@ -1083,10 +1151,9 @@ function buildWorld() {
   scene.add(ground);
 
   // ── Water plane (river/pond) ──
-  const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x18324e, roughness: 0.02, metalness: 0.88,
-    transparent: true, opacity: 0.76,
-    envMapIntensity: 1.6,
+  const waterMat = new THREE.MeshLambertMaterial({
+    color: 0x2a5680,
+    transparent: true, opacity: 0.78,
   });
   const waterGeo = new THREE.PlaneGeometry(MAP.size*2.4, MAP.size*2.4);
   waterGeo.rotateX(-Math.PI/2);
@@ -1112,6 +1179,7 @@ function buildWorld() {
 
   // ----- BUILD THE CITY -----
   buildCity(cityCenter.x, cityCenter.y, cityRadius);
+  flushCityMeshes(); // collapse ~50 building meshes into 2 draw calls
 
   flushLampPosts(); // merge all lamp posts into one draw call
   // ── Neighborhoods: one per map quadrant ─────────────────────────────────
@@ -1277,13 +1345,13 @@ function buildWorld() {
     parts.push({ geo: makeBoxGeo(slopeLenZ,0.22,ridgeLen, W/4,h+rh/2,0,0,0,-slopeAngleZ), color:roofC });
     parts.push({ geo: makeBoxGeo(slopeLenZ,0.22,ridgeLen,-W/4,h+rh/2,0,0,0, slopeAngleZ), color:roofC });
 
-    if (!makeBuilding._mat) makeBuilding._mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    if (!makeBuilding._mat) makeBuilding._mat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
     const mesh = makeMergedMesh(parts, makeBuilding._mat);
     for (const p of parts) p.geo.dispose();
     if (!mesh) return;
     mesh.position.set(x, groundY, z);
     mesh.rotation.y = facingAng;
-    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.castShadow = false; mesh.receiveShadow = true;
     scene.add(mesh);
 
     // Add LOS-blocking collision boxes for three walls (no lateral movement block, just LOS).
@@ -1618,7 +1686,7 @@ function buildCity(cx, cz, radius) {
     const hw=(Math.abs(rot)>0.1)?CAR_HALF_LEN:CAR_HALF_WID;
     const hd=(Math.abs(rot)>0.1)?CAR_HALF_WID:CAR_HALF_LEN;
     if (placedCarBoxes.some(b=>Math.abs(b.x-px)<hw+b.hw+0.6&&Math.abs(b.z-pz)<hd+b.hd+0.6)) return;
-    placedCarBoxes.push({x:px,z:pz,hw,hd}); if(Math.random()<0.25) makeTruck(px,pz,rot); else makeCar(px,pz,rot);
+    placedCarBoxes.push({x:px,z:pz,hw,hd}); makeCar(px,pz,rot);
   }
   for (let i=0; i<cellsAcross; i++) {
     for (let j=0; j<cellsAcross; j++) {
@@ -1725,16 +1793,16 @@ function makeCityBuilding(cx, cz, blockSize) {
       structParts.push({ geo: makeBoxGeo(winW + 0.18, winStripH + 0.18, 0.04, winX, cy, d/2 + 0.018), color: winFrameC });
       structParts.push({ geo: makeBoxGeo(winW + 0.18, winStripH + 0.18, 0.04, winX, cy, -d/2 - 0.018), color: winFrameC });
       // Window panes (separate mesh w/ emissive)
-      windowParts.push(makeBoxGeo(winW, winStripH, 0.05, winX, cy, d/2 + 0.025));
-      windowParts.push(makeBoxGeo(winW, winStripH, 0.05, winX, cy, -d/2 - 0.025));
+      windowParts.push(makeBoxGeo(winW, winStripH, 0.05, winX, cy, d/2 + 0.10));
+      windowParts.push(makeBoxGeo(winW, winStripH, 0.05, winX, cy, -d/2 - 0.10));
     }
     for (let k=0; k<winsPerSideD; k++) {
       const winD = (d - margin*2) / winsPerSideD - 0.4;
       const winZ = -d/2 + margin + (k + 0.5) * ((d - margin*2) / winsPerSideD);
       structParts.push({ geo: makeBoxGeo(0.04, winStripH + 0.18, winD + 0.18, -w/2 - 0.018, cy, winZ), color: winFrameC });
       structParts.push({ geo: makeBoxGeo(0.04, winStripH + 0.18, winD + 0.18,  w/2 + 0.018, cy, winZ), color: winFrameC });
-      windowParts.push(makeBoxGeo(0.05, winStripH, winD, -w/2 - 0.025, cy, winZ));
-      windowParts.push(makeBoxGeo(0.05, winStripH, winD,  w/2 + 0.025, cy, winZ));
+      windowParts.push(makeBoxGeo(0.05, winStripH, winD, -w/2 - 0.10, cy, winZ));
+      windowParts.push(makeBoxGeo(0.05, winStripH, winD,  w/2 + 0.10, cy, winZ));
     }
   }
 
@@ -1745,14 +1813,13 @@ function makeCityBuilding(cx, cz, blockSize) {
   // Foundation slab: extends 3 units below ground to fill any mesh interpolation gaps
   const foundH = 3.5;
   structParts.push({ geo: makeBoxGeo(w + 1.0, foundH, d + 1.0, 0, -foundH/2 + 0.1, 0), color: 0x2a2a2a });
+  // Bake world position into geometry and defer to flushCityMeshes() for batched draw call
   const structMesh = makeMergedMesh(structParts);
   if (structMesh) {
-    structMesh.position.set(cx, _cityBldgY, cz);
-    structMesh.castShadow = true;
-    structMesh.receiveShadow = true;
-    scene.add(structMesh);
+    structMesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(cx, _cityBldgY, cz));
+    if (!makeCityBuilding._sBatch) makeCityBuilding._sBatch = [];
+    makeCityBuilding._sBatch.push(structMesh.geometry);
   }
-  // Build merged window mesh (single material, separate from struct because of emissive)
   if (windowParts.length) {
     const winGeo = BufferGeometryUtils.mergeBufferGeometries(windowParts, false);
     for (const g of windowParts) g.dispose();
@@ -1761,11 +1828,12 @@ function makeCityBuilding(cx, cz, blockSize) {
         makeCityBuilding._winMat = new THREE.MeshStandardMaterial({
           color: 0x3a4a58, roughness: 0.12, metalness: 0.45,
           emissive: 0x1a2a3a, emissiveIntensity: 0.55,
+          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
         });
       }
-      const winMesh = new THREE.Mesh(winGeo, makeCityBuilding._winMat);
-      winMesh.position.set(cx, _cityBldgY, cz);
-      scene.add(winMesh);
+      winGeo.applyMatrix4(new THREE.Matrix4().makeTranslation(cx, _cityBldgY, cz));
+      if (!makeCityBuilding._wBatch) makeCityBuilding._wBatch = [];
+      makeCityBuilding._wBatch.push(winGeo);
     }
   }
   // free temp source geos
@@ -1778,23 +1846,76 @@ function makeCityBuilding(cx, cz, blockSize) {
   );
   buildings.push({ userData:{ bbox, solid: true } });
 }
+// Merge all deferred city building geos into two draw calls (struct + windows).
+function flushCityMeshes() {
+  if (makeCityBuilding._sBatch && makeCityBuilding._sBatch.length) {
+    try {
+      const merged = mergeGeometries(makeCityBuilding._sBatch, false);
+      if (merged) {
+        const m = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({ vertexColors: true }));
+        m.receiveShadow = true;
+        scene.add(m);
+      }
+    } catch(e) {}
+    makeCityBuilding._sBatch.forEach(g => g.dispose());
+    makeCityBuilding._sBatch = [];
+  }
+  if (makeCityBuilding._wBatch && makeCityBuilding._wBatch.length) {
+    try {
+      const merged = mergeGeometries(makeCityBuilding._wBatch, false);
+      if (merged) scene.add(new THREE.Mesh(merged, makeCityBuilding._winMat));
+    } catch(e) {}
+    makeCityBuilding._wBatch.forEach(g => g.dispose());
+    makeCityBuilding._wBatch = [];
+  }
+}
 
 // ----- Cars -----
-function _placeCarModel(model, x, z, rot, carY) {
+// Flatten all sub-meshes of a cloned GLB car into one mesh per material.
+// Reduces draw calls from ~15-20 per car down to ~3-5.
+function _flattenCar(car) {
+  car.updateMatrixWorld(true);
+  const byMat = new Map();
+  car.traverse(c => {
+    if (!c.isMesh) return;
+    const mat = Array.isArray(c.material) ? c.material[0] : c.material;
+    if (!mat) return;
+    const key = mat.uuid;
+    const geo = c.geometry.clone();
+    geo.applyMatrix4(c.matrixWorld);
+    if (!byMat.has(key)) byMat.set(key, { mat, geos: [] });
+    byMat.get(key).geos.push(geo);
+  });
+  const flat = new THREE.Group();
+  byMat.forEach(({ mat, geos }) => {
+    try {
+      const merged = mergeGeometries(geos, false);
+      if (merged) {
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = false;
+        mesh.receiveShadow = true;
+        flat.add(mesh);
+      }
+    } catch(e) {}
+    geos.forEach(g => g.dispose());
+  });
+  return flat;
+}
+function _placeCarModel(model, x, z, rot, carY, targetSize = 4.2) {
   const car = SkeletonUtils.clone(model);
-  car.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
   car.updateMatrixWorld(true);
   const b0 = new THREE.Box3().setFromObject(car);
   const s0 = new THREE.Vector3(); b0.getSize(s0);
   const longestSide = Math.max(s0.x, s0.z);
   if (!(longestSide > 0)) return null;
-  car.scale.setScalar(4.2 / longestSide);
+  car.scale.setScalar(targetSize / longestSide);
   car.updateMatrixWorld(true);
   const b1 = new THREE.Box3().setFromObject(car);
   const ctr = new THREE.Vector3(); b1.getCenter(ctr);
   car.position.set(-ctr.x, -b1.min.y, -ctr.z);
+  const flat = _flattenCar(car);
   const grp = new THREE.Group();
-  grp.add(car);
+  grp.add(flat);
   grp.position.set(x, carY, z);
   grp.rotation.y = rot;
   scene.add(grp);
@@ -1804,16 +1925,21 @@ const CAR_COLORS = [
   0x2a2a30, 0x4a4a55, 0x701a1a, 0x223340, 0x6a4a30, 0x444844, 0x382a22, 0x8a2018, 0x5a5a60
 ];
 function makeCar(x, z, rot, overrideY) {
-  // Try GLTF models first — randomly pick Tesla or low poly car
+  // Try GLTF car models first
   const _carMdls = [];
-  if (TESLA_MODEL)      _carMdls.push(TESLA_MODEL);
-  if (LOWPOLYCAR_MODEL) _carMdls.push(LOWPOLYCAR_MODEL);
+  if (LOWPOLYCAR_MODEL)  _carMdls.push(LOWPOLYCAR_MODEL);
+  if (TOYOTA_MODEL)      _carMdls.push(TOYOTA_MODEL);
+  if (RACECAR_MODEL)     _carMdls.push(RACECAR_MODEL);
+  if (FREELOWPOLY_MODEL) _carMdls.push(FREELOWPOLY_MODEL);
+  if (VAN_MODEL)         _carMdls.push(VAN_MODEL);
+  if (MUSCLECAR_MODEL)   _carMdls.push(MUSCLECAR_MODEL);
   if (_carMdls.length > 0) {
     const _gY = (overrideY !== undefined) ? overrideY
       : (world && Math.hypot(x - world.cityCenter.x, z - world.cityCenter.y) < world.cityRadius + 20)
         ? 0 : sampleTerrainHeight(x, z);
     const mdl = _carMdls[Math.floor(Math.random() * _carMdls.length)];
-    const grp = _placeCarModel(mdl, x, z, rot, _gY);
+    const _carTargetSize = 5.04;
+    const grp = _placeCarModel(mdl, x, z, rot, _gY, _carTargetSize);
     if (grp) {
       const cosR=Math.cos(rot), sinR=Math.sin(rot), hw=0.92, st=0.45, hl=1.0;
       function carBB(cx,cz,hL,hLat,cA,sA,y0,y1){const ex=Math.abs(cA*hL)+Math.abs(sA*hLat),ez=Math.abs(sA*hL)+Math.abs(cA*hLat);return new THREE.Box3(new THREE.Vector3(cx-ex,y0,cz-ez),new THREE.Vector3(cx+ex,y1,cz+ez));}
@@ -1826,73 +1952,8 @@ function makeCar(x, z, rot, overrideY) {
       return;
     }
   }
-  const color = CAR_COLORS[Math.floor(Math.random()*CAR_COLORS.length)];
-  // Glass and tire/trim are darker base colors that work fine vertex-colored on a single Standard material
-  const tireC = 0x161616, trimC = 0x222222, lightC = 0xddd8b4, tailC = 0x882018;
-  const glassC = 0x1a1f24;
-
-  const parts = [];
-  // Body parts (paint color)
-  parts.push({ geo: makeBoxGeo(1.85, 0.55, 4.2, 0, 0.55, 0), color });
-  parts.push({ geo: makeBoxGeo(1.85, 0.30, 1.3, 0, 0.92, -1.2), color });
-  parts.push({ geo: makeBoxGeo(1.7, 0.85, 2.0, 0, 1.18, 0.20), color });
-  parts.push({ geo: makeBoxGeo(1.85, 0.32, 1.1, 0, 0.93, 1.4), color });
-  // Windows (vertex-colored dark; we lose subtle emissive but save a draw call)
-  parts.push({ geo: makeBoxGeo(1.6, 0.05, 0.8, 0, 1.30, -0.78, -0.45, 0, 0), color: glassC });
-  parts.push({ geo: makeBoxGeo(1.6, 0.05, 0.7, 0, 1.30, 1.18, 0.45, 0, 0), color: glassC });
-  parts.push({ geo: makeBoxGeo(0.05, 0.6, 1.7, -0.86, 1.30, 0.20), color: glassC });
-  parts.push({ geo: makeBoxGeo(0.05, 0.6, 1.7,  0.86, 1.30, 0.20), color: glassC });
-  // Wheels — rotated cylinders along X
-  for (const [wx, wz] of [[-0.85, -1.30], [0.85, -1.30], [-0.85, 1.40], [0.85, 1.40]]) {
-    parts.push({ geo: makeCylGeo(0.36, 0.36, 0.24, 10, wx, 0.36, wz, 0, 0, Math.PI/2), color: tireC });
-    parts.push({ geo: makeCylGeo(0.18, 0.18, 0.26, 8,  wx, 0.36, wz, 0, 0, Math.PI/2), color: trimC });
-  }
-  // Headlights / tail lights — bake-in via vertex color (no emissive but tiny size)
-  for (const lx of [-0.65, 0.65]) {
-    parts.push({ geo: makeBoxGeo(0.32, 0.18, 0.06, lx, 0.85, -1.85), color: lightC });
-  }
-  for (const lx of [-0.7, 0.7]) {
-    parts.push({ geo: makeBoxGeo(0.28, 0.14, 0.06, lx, 0.92, 1.95), color: tailC });
-  }
-  // Bumpers
-  parts.push({ geo: makeBoxGeo(1.95, 0.2, 0.18, 0, 0.55, -2.05), color: trimC });
-  parts.push({ geo: makeBoxGeo(1.95, 0.2, 0.18, 0, 0.55,  2.05), color: trimC });
-
-  // Build merged mesh with a shared semi-metallic material
-  if (!makeCar._mat) {
-    makeCar._mat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.55, metalness: 0.55,
-    });
-  }
-  const mesh = makeMergedMesh(parts, makeCar._mat);
-  for (const p of parts) p.geo.dispose();
-  if (!mesh) return;
-  const _carY = (overrideY !== undefined) ? overrideY
-    : (world && Math.hypot(x - world.cityCenter.x, z - world.cityCenter.y) < world.cityRadius + 20)
-      ? 0 : sampleTerrainHeight(x, z);
-  mesh.position.set(x, _carY + 0.18, z);
-  mesh.rotation.y = rot;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
-
-  // Car collision: short side slabs only over the door section (not full length)
-  // Front/rear quarters are open so player can walk up hood/trunk and off the roof freely.
-  const cosR=Math.cos(rot), sinR=Math.sin(rot);
-  const doorHalfLen=1.0; // only covers the door section, not the full 2.25 half-length
-  const halfWid=0.92, sideThick=0.45, sideTopY=_carY+0.95;
-  function obbAABB(cx2,cz2,hLon,hLat,cosA,sinA,yLo,yHi) {
-    const ex=Math.abs(cosA*hLon)+Math.abs(sinA*hLat), ez=Math.abs(sinA*hLon)+Math.abs(cosA*hLat);
-    return new THREE.Box3(new THREE.Vector3(cx2-ex,yLo,cz2-ez),new THREE.Vector3(cx2+ex,yHi,cz2+ez));
-  }
-  const perpX=sinR*halfWid, perpZ=-cosR*halfWid;
-  buildings.push({userData:{bbox:obbAABB(x-perpX,z-perpZ,doorHalfLen,sideThick,cosR,sinR,_carY+0.1,sideTopY),solid:true}});
-  buildings.push({userData:{bbox:obbAABB(x+perpX,z+perpZ,doorHalfLen,sideThick,cosR,sinR,_carY+0.1,sideTopY),solid:true}});
-  // Roof ground slab — full footprint so player can stand anywhere on top
-  const roofHx=Math.abs(cosR*halfWid)+Math.abs(sinR*2.25), roofHz=Math.abs(sinR*halfWid)+Math.abs(cosR*2.25);
-  buildings.push({userData:{bbox:new THREE.Box3(new THREE.Vector3(x-roofHx,_carY+1.20,z-roofHz),new THREE.Vector3(x+roofHx,_carY+1.32,z+roofHz)),ground:true}});
-
-  registerSearchable(mesh, 'car', x, z);
 }
+
 
 // ----- Lamp post -----
 function makeLampPost(x, z) {
@@ -2072,7 +2133,7 @@ function makeToolbox(truckX, truckZ, rot, bedFloorY, cosR, sinR) {
   if (!mesh) return;
   mesh.position.set(wx, wy, wz);
   mesh.rotation.y = rot;
-  mesh.castShadow = true;
+  mesh.castShadow = false;
   scene.add(mesh);
   registerSearchable(mesh, 'toolbox', wx, wz);
 }
@@ -2096,7 +2157,7 @@ function makeDumpster(x, z, rot) {
   if (!mesh) return;
   mesh.position.set(x, sampleTerrainHeight(x, z), z);
   mesh.rotation.y = rot;
-  mesh.castShadow = true;
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   scene.add(mesh);
   buildings.push({ userData:{ bbox: new THREE.Box3().setFromObject(mesh), solid: true } });
@@ -2125,7 +2186,7 @@ function makeGarbageCan(x, z, rot) {
   if (!mesh) return;
   mesh.position.set(x, sampleTerrainHeight(x, z), z);
   mesh.rotation.y = rot || 0;
-  mesh.castShadow = true;
+  mesh.castShadow = false;
   scene.add(mesh);
   buildings.push({ userData:{ bbox: new THREE.Box3().setFromObject(mesh), solid: true } });
   registerSearchable(mesh, 'garbage_can', x, z);
@@ -2153,7 +2214,7 @@ function makePark(cx, cz, blockSize) {
   const benchMat = new THREE.MeshStandardMaterial({ color: 0x40302a, roughness: 0.9 });
   const bench = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.10, 0.5), benchMat);
   bench.position.set(cx, _grassY + 0.30, cz + 4);
-  bench.castShadow = true;
+  bench.castShadow = false;
   scene.add(bench);
   const benchBack = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.7, 0.10), benchMat);
   benchBack.position.set(cx, _grassY + 0.65, cz + 4.2);
@@ -2345,7 +2406,7 @@ function makeBuilding(x, z, fixedW, fixedD, fixedH, rotY) {
   if (!mesh) return;
   mesh.position.set(x, groundY, z);
   if (rotY !== undefined) mesh.rotation.y = rotY;
-  mesh.castShadow = true;
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   scene.add(mesh);
 
@@ -2657,7 +2718,7 @@ function commitVegetationBatches() {
         const im = new THREE.InstancedMesh(geo, mat, ps.length);
         im.castShadow = castShadow;
         im.receiveShadow = receiveShadow;
-        im.frustumCulled = false;
+        im.frustumCulled = true; // cull off-screen tree/rock instances
         for (let i = 0; i < ps.length; i++) {
           const p = ps[i];
           dummy.position.set(p.x, p.y, p.z);
@@ -2758,7 +2819,7 @@ class Entity {
       const staticMesh = makeMergedMesh(staticParts, staticMat);
       for (const p of staticParts) p.geo.dispose();
       if (staticMesh) {
-        staticMesh.castShadow = true;
+        staticMesh.castShadow = false;
         botGroup.add(staticMesh);
       }
 
@@ -3211,6 +3272,62 @@ function makeRandomItem(type, containerType) {
     return {type:'armor',amount:50,name:'ARMOR VEST'};
   }
 }
+function _makeGltfPickupMesh(model, rx, ry, rz, targetSize) {
+  if (!model) return null;
+  const clone = SkeletonUtils.clone(model);
+  clone.traverse(c => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = false; c.frustumCulled = false; const mats=Array.isArray(c.material)?c.material:[c.material]; mats.forEach(m=>{ if(m) m.side=THREE.DoubleSide; }); } });
+  clone.rotation.set(rx, ry, rz);
+  clone.updateMatrixWorld(true);
+  const b0 = new THREE.Box3().setFromObject(clone);
+  const s0 = new THREE.Vector3(); b0.getSize(s0);
+  const maxDim = Math.max(s0.x, s0.y, s0.z);
+  if (!(maxDim > 0)) return null;
+  clone.scale.setScalar(targetSize / maxDim);
+  clone.updateMatrixWorld(true);
+  const b1 = new THREE.Box3().setFromObject(clone);
+  const ctr = new THREE.Vector3(); b1.getCenter(ctr);
+  const wrapper = new THREE.Group();
+  clone.position.set(-ctr.x, -ctr.y, -ctr.z);
+  wrapper.add(clone);
+  return wrapper;
+}
+
+function _makeWeaponPickupMesh(weaponKey) {
+  // [mdl, rx, ry, rz] — same axis orientations as _gltfGun so guns lie horizontal
+  const M = {
+    ar:      [M4_MODEL,      0,          -Math.PI/2, 0,          0.90],
+    ak:      [AK_MODEL,      0,          -Math.PI/2, 0,          0.90],
+    sr:      [KAR98_MODEL,   0,           0,         0,          0.90],
+    barrett: [BARRETT_MODEL, 0,           Math.PI,   0,          0.90],
+    smg:     [UMP45_MODEL,   0,           0,         0,          0.90],
+    p90:     [P90_MODEL,     0,           Math.PI,   0,          0.90],
+    pistol:  [BERETTA_MODEL, 0,           0,         0,          0.45],
+    deagle:  [DEAGLE_MODEL,  0,           0,         0,          0.45],
+    shotgun: [IZH27_MODEL,   0,           Math.PI,   0,          0.90],
+    spas:    [SPAS12_MODEL,  0,           0,         0,          0.90],
+    machete: [KNIFE_MODEL,   0,           0,         0,          0.45],
+    bat:     [BAT_MODEL,     0,           0,        -Math.PI/2,  0.45],
+    crowbar: [CROWBAR_MODEL, 0,           0,         0,          0.45],
+  };
+  const e = M[weaponKey];
+  if (!e || !e[0]) return null;
+  const clone = SkeletonUtils.clone(e[0]);
+  clone.traverse(c => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = false; c.frustumCulled = false; } });
+  clone.rotation.set(e[1], e[2], e[3]);
+  clone.updateMatrixWorld(true);
+  const b0 = new THREE.Box3().setFromObject(clone);
+  const s0 = new THREE.Vector3(); b0.getSize(s0);
+  const maxDim = Math.max(s0.x, s0.y, s0.z);
+  if (!(maxDim > 0)) return null;
+  clone.scale.setScalar(e[4] / maxDim);
+  clone.updateMatrixWorld(true);
+  const b1 = new THREE.Box3().setFromObject(clone);
+  const ctr = new THREE.Vector3(); b1.getCenter(ctr);
+  const wrapper = new THREE.Group();
+  clone.position.set(-ctr.x, -ctr.y, -ctr.z);
+  wrapper.add(clone);
+  return wrapper;
+}
 function createLootMesh(item, x, z, explicitY) {
   const isMelee = item.type === 'weapon' && item.key && WEAPONS[item.key] && WEAPONS[item.key].melee;
   const TYPE_CFG = {
@@ -3253,55 +3370,65 @@ function createLootMesh(item, x, z, explicitY) {
   let modelMesh;
   const mat = new THREE.MeshStandardMaterial({ color, emissive: cfg.emissive, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.3 });
 
-  if (isMelee) {
-    // Baseball bat silhouette: thin handle + wide barrel
-    const g = new THREE.Group();
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.30, 0.06), mat);
-    handle.position.set(0, -0.18, 0);
-    g.add(handle);
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), mat);
-    barrel.position.set(0, 0.15, 0);
-    g.add(barrel);
-    const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.06, 0.10), mat);
-    knob.position.set(0, -0.35, 0);
-    g.add(knob);
-    modelMesh = g;
-  } else if (item.type === 'weapon') {
-    // Stylised gun silhouette: receiver box + barrel cylinder
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.22, 0.55), mat));
-    const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 8), mat);
-    brl.rotation.x = Math.PI/2; brl.position.set(0, 0.06, -0.44);
-    g.add(brl);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.10), mat);
-    grip.position.set(0, -0.18, 0.18); grip.rotation.x = 0.3;
-    g.add(grip);
-    modelMesh = g;
-  } else if (item.type === 'heal') {
-    // Pill / medkit cross
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.38, 0.12), mat));
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.12), mat));
-    modelMesh = g;
-  } else if (item.type === 'ammo') {
-    // Stack of bullet cylinders
-    const g = new THREE.Group();
-    for (let i = 0; i < 5; i++) {
-      const blt = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.26, 7), mat);
-      blt.position.set((i%3-1)*0.10, i > 2 ? 0.10 : 0, i > 2 ? (i-3-0.5)*0.10 : (i-1)*0.10);
-      g.add(blt);
+  if (isMelee || item.type === 'weapon') {
+    const gltfPick = item.key ? _makeWeaponPickupMesh(item.key) : null;
+    if (gltfPick) {
+      modelMesh = gltfPick;
+    } else if (isMelee) {
+      const g = new THREE.Group();
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.30, 0.06), mat);
+      handle.position.set(0, -0.18, 0); g.add(handle);
+      const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), mat);
+      barrel.position.set(0, 0.15, 0); g.add(barrel);
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.06, 0.10), mat);
+      knob.position.set(0, -0.35, 0); g.add(knob);
+      modelMesh = g;
+    } else {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.22, 0.55), mat));
+      const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 8), mat);
+      brl.rotation.x = Math.PI/2; brl.position.set(0, 0.06, -0.44); g.add(brl);
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.10), mat);
+      grip.position.set(0, -0.18, 0.18); grip.rotation.x = 0.3; g.add(grip);
+      modelMesh = g;
     }
-    modelMesh = g;
+  } else if (item.type === 'heal') {
+    const _healMdl = (item.key === 'bandage' ? BANDAGE_MODEL : MEDKIT_MODEL);
+    if (_healMdl) {
+      modelMesh = _makeGltfPickupMesh(_healMdl, 0, 0, 0, item.key === 'bandage' ? 0.28 : 0.32);
+    }
+    if (!modelMesh) {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.38, 0.12), mat));
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.12), mat));
+      modelMesh = g;
+    }
+  } else if (item.type === 'ammo') {
+    if (AMMOBOX_MODEL) {
+      modelMesh = _makeGltfPickupMesh(AMMOBOX_MODEL, 0, 0, 0, 0.35);
+    }
+    if (!modelMesh) {
+      const g = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const blt = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.26, 7), mat);
+        blt.position.set((i%3-1)*0.10, i > 2 ? 0.10 : 0, i > 2 ? (i-3-0.5)*0.10 : (i-1)*0.10);
+        g.add(blt);
+      }
+      modelMesh = g;
+    }
   } else if (item.type === 'attachment') {
-    // Scope cylinder
-    const g = new THREE.Group();
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.44, 10), mat);
-    tube.rotation.x = Math.PI/2;
-    g.add(tube);
-    const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.07, 0.10, 10), mat);
-    bell.rotation.x = Math.PI/2; bell.position.z = -0.26;
-    g.add(bell);
-    modelMesh = g;
+    const _sightMdls = { reddot:REDDOT_SIGHT_MODEL, holo:HOLO_MODEL, scope2x:SCOPE2X_MODEL, scope4x:ACOG_MODEL, scope8x:SCOPE8X_MODEL, extmag:EXTMAG_MODEL, grip:GRIP_MODEL, comp:COMP_MODEL, silencer:SILENCER_MODEL };
+    const _sightSizes = { reddot:0.22, holo:0.25, scope2x:0.32, scope4x:0.30, scope8x:0.36, extmag:0.28, grip:0.22, comp:0.20, silencer:0.28 };
+    const _sightMdl = _sightMdls[item.key];
+    if (_sightMdl) modelMesh = _makeGltfPickupMesh(_sightMdl, 0, 0, 0, _sightSizes[item.key] || 0.28);
+    if (!modelMesh) {
+      const g = new THREE.Group();
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.44, 10), mat);
+      tube.rotation.x = Math.PI/2; g.add(tube);
+      const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.07, 0.10, 10), mat);
+      bell.rotation.x = Math.PI/2; bell.position.z = -0.26; g.add(bell);
+      modelMesh = g;
+    }
   } else if (item.type === 'armor') {
     // Chest-plate shape: box with shoulder tabs
     const g = new THREE.Group();
@@ -3577,72 +3704,54 @@ function updateBullets(dt) {
   for (let i=bullets.length-1; i>=0; i--) {
     const b = bullets[i];
     const step = b.speed * dt;
-    const next = b.mesh.position.clone().add(b.dir.clone().multiplyScalar(step));
-    // Hit detection vs entities (raycast small segment)
-    let hit = null;
-    let hitDist = Infinity;
-    let isHead = false;
-    for (const e of entities) {
-      if (!e.alive || e === b.owner) continue;
-      // Body hitbox: check multiple points along the vertical center to form a capsule
-      // Lower body (hips/legs)
-      const loPos = e.pos.clone(); loPos.y += 0.5;
-      // Mid body (torso center - where plate carrier is)
-      const midPos = e.pos.clone(); midPos.y += 1.15;
-      // Head
-      const headPos = e.pos.clone(); headPos.y += 1.65;
-
-      const seg = next.clone().sub(b.mesh.position);
-      const segLen = seg.length(); if (segLen < 0.001) continue;
-      const segN = seg.clone().normalize();
-
-      // Check each body zone against the bullet segment
-      const bodyRadius = 0.80;  // generous to match soldier visual width
-      const headRadius = 0.35;
-
-      // Test body (lower + mid)
-      for (const bPos of [loPos, midPos]) {
-        const toE = bPos.clone().sub(b.mesh.position);
-        const t = Math.max(0, Math.min(segLen, toE.dot(segN)));
-        const closest = b.mesh.position.clone().add(segN.clone().multiplyScalar(t));
-        const dist = closest.distanceTo(bPos);
-        if (dist < bodyRadius) {
-          const d = b.traveled + t;
-          if (d < hitDist) { hit = e; hitDist = d; isHead = false; }
+    _sv0.copy(b.mesh.position).addScaledVector(b.dir, step);
+    _sv1.subVectors(_sv0, b.mesh.position);
+    const segLen = _sv1.length();
+    if (segLen > 0.001) _sv2.copy(_sv1).divideScalar(segLen);
+    let hit = null, hitDist = Infinity, isHead = false;
+    if (segLen > 0.001) {
+      for (const e of entities) {
+        if (!e.alive || e === b.owner) continue;
+        for (let bi = 0; bi < 3; bi++) {
+          _sv3.copy(e.pos);
+          _sv3.y += bi === 0 ? 0.5 : bi === 1 ? 1.15 : 1.65;
+          _sv4.subVectors(_sv3, b.mesh.position);
+          const t = Math.max(0, Math.min(segLen, _sv4.dot(_sv2)));
+          _sv5.copy(b.mesh.position).addScaledVector(_sv2, t);
+          if (_sv5.distanceTo(_sv3) < (bi === 2 ? 0.35 : 0.80)) {
+            const d = b.traveled + t;
+            if (d < hitDist) { hit = e; hitDist = d; isHead = bi === 2; }
+          }
         }
       }
-      // Head check (smaller radius, higher damage)
-      const toH = headPos.clone().sub(b.mesh.position);
-      const th = Math.max(0, Math.min(segLen, toH.dot(segN)));
-      const closestH = b.mesh.position.clone().add(segN.clone().multiplyScalar(th));
-      const distHead = closestH.distanceTo(headPos);
-      if (distHead < headRadius) {
-        const d = b.traveled + th;
-        if (d < hitDist) { hit = e; hitDist = d; isHead = true; }
-      }
     }
-    // Hit detection vs world (terrain + buildings)
     let worldHit = false;
-    const terrainH = sampleTerrainHeight(next.x, next.z);
-    if (next.y < terrainH + 0.1) worldHit = true;
-    for (const bd of buildings) {
-      if (bd.userData.bbox && bd.userData.bbox.containsPoint(next)) { worldHit = true; break; }
+    const terrainH = sampleTerrainHeight(_sv0.x, _sv0.z);
+    if (_sv0.y < terrainH + 0.1) worldHit = true;
+    if (!worldHit) for (const bd of buildings) {
+      if (bd.userData.bbox && bd.userData.bbox.containsPoint(_sv0)) {
+        worldHit = true;
+        if (bd.userData.isRangeTarget && b.owner && b.owner.isPlayer) {
+          showHitmarker();
+          const tMesh = bd.userData.targetMesh;
+          if (tMesh && tMesh.userData.tMat) {
+            tMesh.userData.tMat.color.setHex(0xff2020);
+            setTimeout(() => tMesh.userData.tMat.color.setHex(0xf0e8d0), 400);
+          }
+        }
+        break;
+      }
     }
     if (hit) {
       hit.takeDamage(b.dmg, b.owner, isHead);
       if (b.owner && b.owner.isPlayer) showHitmarker();
-      scene.remove(b.mesh);
-      bullets.splice(i, 1);
-      continue;
+      scene.remove(b.mesh); bullets.splice(i, 1); continue;
     }
     if (worldHit || b.traveled > b.range) {
-      // tiny puff
-      scene.remove(b.mesh);
-      bullets.splice(i, 1);
-      continue;
+      scene.remove(b.mesh); bullets.splice(i, 1); continue;
     }
-    b.mesh.position.copy(next);
-    b.mesh.lookAt(next.clone().add(b.dir));
+    b.mesh.position.copy(_sv0);
+    _sv6.copy(_sv0).add(b.dir); b.mesh.lookAt(_sv6);
     b.traveled += step;
   }
 }
@@ -3650,21 +3759,47 @@ function updateBullets(dt) {
 // ============================================================================
 // COLLISION
 // ============================================================================
+// Pre-built flat typed arrays — populated by _buildCollisionCache() after buildWorld()
+let _colBB = null;  // Float32Array [minX, minZ, maxX, maxZ, ...]
+let _colTR = null;  // Float32Array [x, z, r, ...]
+function _buildCollisionCache() {
+  const solidBlds = buildings.filter(b => b.userData.bbox && !b.userData.ground && !b.userData.losOnly);
+  _colBB = new Float32Array(solidBlds.length * 4);
+  for (let i = 0; i < solidBlds.length; i++) {
+    const bb = solidBlds[i].userData.bbox;
+    _colBB[i*4]   = bb.min.x;
+    _colBB[i*4+1] = bb.min.z;
+    _colBB[i*4+2] = bb.max.x;
+    _colBB[i*4+3] = bb.max.z;
+  }
+  _colTR = new Float32Array(trees.length * 3);
+  for (let i = 0; i < trees.length; i++) {
+    _colTR[i*3]   = trees[i].position.x;
+    _colTR[i*3+1] = trees[i].position.z;
+    _colTR[i*3+2] = trees[i].userData.radius || 0.6;
+  }
+}
 function collidesPos(x, z, r) {
-  for (const bd of buildings) {
-    if (!bd.userData.bbox) continue;
-    if (bd.userData.ground) continue; // ground slabs don't block lateral movement
-    if (bd.userData.losOnly) continue; // LOS-only sentinels don't block movement
-    const bb = bd.userData.bbox;
-    if (x > bb.min.x - r && x < bb.max.x + r && z > bb.min.z - r && z < bb.max.z + r) {
-      return true;
+  if (_colBB) {
+    for (let i = 0; i < _colBB.length; i += 4) {
+      if (x > _colBB[i]-r && x < _colBB[i+2]+r && z > _colBB[i+1]-r && z < _colBB[i+3]+r) return true;
     }
+    if (_colTR) {
+      for (let i = 0; i < _colTR.length; i += 3) {
+        const dx = x - _colTR[i], dz = z - _colTR[i+1], rr = _colTR[i+2]+r;
+        if (dx*dx + dz*dz < rr*rr) return true;
+      }
+    }
+    return false;
+  }
+  for (const bd of buildings) {
+    if (!bd.userData.bbox || bd.userData.ground || bd.userData.losOnly) continue;
+    const bb = bd.userData.bbox;
+    if (x > bb.min.x-r && x < bb.max.x+r && z > bb.min.z-r && z < bb.max.z+r) return true;
   }
   for (const tr of trees) {
-    const dx = x - tr.position.x;
-    const dz = z - tr.position.z;
-    const rr = (tr.userData.radius || 0.5) + r;
-    if (dx*dx + dz*dz < rr*rr) return true;
+    const dx = x-tr.position.x, dz = z-tr.position.z, rr=(tr.userData.radius||0.5)+r;
+    if (dx*dx+dz*dz < rr*rr) return true;
   }
   return false;
 }
@@ -4612,7 +4747,7 @@ function updateViewmodel(dt) {
   if (!viewmodel.visible) return;
 
   // Red-dot: hide housing when ADS so just the lens is visible (cleaner look)
-  const adsThroughReddot = player.isAds && stats && stats.scope === 'reddot';
+  const adsThroughReddot = player.isAds && stats && (stats.scope === 'reddot' || stats.scope === 'holo');
   if (viewmodel.userData.reddotHousing) {
     viewmodel.userData.reddotHousing.visible = !adsThroughReddot;
   }
@@ -4936,7 +5071,7 @@ function updatePlayer(dt) {
       r4.setAttribute('display','inline');
       r2.setAttribute('display','none');
     }
-  } else if (scopeType === 'reddot' && player.isAds) {
+  } else if ((scopeType === 'reddot' || scopeType === 'holo') && player.isAds) {
     // Red dot: no black overlay, just the tiny dot in the centre
     scopeEl.classList.remove('on');
     reddotEl.classList.add('on');
@@ -5001,18 +5136,40 @@ function positionCamera() {
 // ============================================================================
 function updateBots(dt) {
   const now = performance.now()/1000;
+  if (!updateBots._frame) updateBots._frame = 0;
+  updateBots._frame++;
   for (const b of entities) {
     if (b.isPlayer || !b.alive) continue;
+
+    // Distance-based AI throttle — saves ~60% CPU on far bots
+    const _tbdx = player ? b.pos.x - player.pos.x : 0;
+    const _tbdz = player ? b.pos.z - player.pos.z : 0;
+    const _tbDist2 = _tbdx*_tbdx + _tbdz*_tbdz;
+
+    // Beyond 200m: hide mesh (fog renders them invisible) + skip entirely
+    if (_tbDist2 > 40000) {
+      if (b.mesh) b.mesh.visible = false;
+      continue;
+    }
+    if (b.mesh) b.mesh.visible = true;
+
+    // 80–200m: run full AI only every 4th frame staggered by entity index
+    const _bIdx = entities.indexOf(b);
+    if (_tbDist2 > 6400 && (updateBots._frame + _bIdx) % 4 !== 0) {
+      // Still sync mesh so position doesn't freeze
+      if (b.mesh) { b.mesh.position.set(b.pos.x, b.pos.y, b.pos.z); b.mesh.rotation.y = b.yaw; }
+      continue;
+    }
     // pick target = nearest enemy in sight
     // Sight range: 60 normal, 120 when already engaged
     const sight = b.aiState === 'engage' ? 120 : 60;
-    const enemies = entities.filter(e => e !== b && e.alive);
     let target = null, td = Infinity;
     const losReady = !b._losNextCheck || now >= b._losNextCheck;
     if (losReady) {
       b._losNextCheck = now + 0.25; // recheck 4x per second
       b._losCache = null;
-      for (const e of enemies) {
+      for (const e of entities) {
+        if (e === b || !e.alive) continue;
         const d = b.pos.distanceTo(e.pos);
         if (d < td && d < sight && hasLineOfSight(b.pos, e.pos)) {
           target = e; td = d;
@@ -5027,7 +5184,7 @@ function updateBots(dt) {
 
     if (target) {
       b.aiState = 'engage';
-      b.lastSeen = target.pos.clone();
+      if (!b.lastSeen) b.lastSeen = new THREE.Vector3(); b.lastSeen.copy(target.pos);
       if (b.alertTimer <= 0) b.alertTimer = b.reactionTime + 0.1; // brief wind-up on first spot
       b.alertTimer -= dt;
 
@@ -5042,7 +5199,7 @@ function updateBots(dt) {
 
       // move (kite / approach)
       const idealDist = b.weapon === 'shotgun' ? 12 : (b.weapon === 'sr' ? 60 : 25);
-      let moveDir = new THREE.Vector3();
+      const moveDir = _sv0;
       if (td > idealDist + 5) moveDir.set(dx, 0, dz).normalize();
       else if (td < idealDist - 5) moveDir.set(-dx, 0, -dz).normalize();
       else {
@@ -5051,9 +5208,9 @@ function updateBots(dt) {
         moveDir.set(-dz, 0, dx).normalize().multiplyScalar(strafe);
       }
       const moveSpeed = 4.5 * settings.skill * 1.4;
-      const np = b.pos.clone().add(moveDir.multiplyScalar(moveSpeed*dt));
-      if (!collidesPos(np.x, b.pos.z, 0.5)) b.pos.x = np.x;
-      if (!collidesPos(b.pos.x, np.z, 0.5)) b.pos.z = np.z;
+      const _bNpE = _sv1.copy(b.pos).addScaledVector(moveDir, moveSpeed*dt);
+      if (!collidesPos(_bNpE.x, b.pos.z, 0.5)) b.pos.x = _bNpE.x;
+      if (!collidesPos(b.pos.x, _bNpE.z, 0.5)) b.pos.z = _bNpE.z;
 
       // shoot
       if (b.alertTimer <= 0) {
@@ -5082,9 +5239,9 @@ function updateBots(dt) {
         const d = Math.sqrt(dx*dx + dz*dz);
         if (d > 3) {
           b.yaw = lerpAngle(b.yaw, Math.atan2(dx, dz), dt*3);
-          const np = b.pos.clone().add(new THREE.Vector3(dx,0,dz).normalize().multiplyScalar(4*dt));
-          if (!collidesPos(np.x, b.pos.z, 0.5)) b.pos.x = np.x;
-          if (!collidesPos(b.pos.x, np.z, 0.5)) b.pos.z = np.z;
+          const _bNpI = _sv1.copy(b.pos).addScaledVector(_sv2.set(dx,0,dz).normalize(), 4*dt);
+          if (!collidesPos(_bNpI.x, b.pos.z, 0.5)) b.pos.x = _bNpI.x;
+          if (!collidesPos(b.pos.x, _bNpI.z, 0.5)) b.pos.z = _bNpI.z;
         }
       } else {
         b.aiState = 'patrol';
@@ -5120,9 +5277,9 @@ function updateBots(dt) {
         if (d > 0.5) {
           b.yaw = lerpAngle(b.yaw, Math.atan2(dx, dz), dt*2);
           const sp = 3.5;
-          const np = b.pos.clone().add(new THREE.Vector3(dx,0,dz).normalize().multiplyScalar(sp*dt));
-          if (!collidesPos(np.x, b.pos.z, 0.5)) b.pos.x = np.x;
-          if (!collidesPos(b.pos.x, np.z, 0.5)) b.pos.z = np.z;
+          const _bNpP = _sv1.copy(b.pos).addScaledVector(_sv2.set(dx,0,dz).normalize(), sp*dt);
+          if (!collidesPos(_bNpP.x, b.pos.z, 0.5)) b.pos.x = _bNpP.x;
+          if (!collidesPos(b.pos.x, _bNpP.z, 0.5)) b.pos.z = _bNpP.z;
         }
       }
     }
@@ -5130,7 +5287,8 @@ function updateBots(dt) {
     // sync mesh — terrain following + walking animation
     // Track movement speed since last frame for the walk cycle
     if (!b.lastSyncPos) b.lastSyncPos = new THREE.Vector3().copy(b.pos);
-    const moved = new THREE.Vector2(b.pos.x - b.lastSyncPos.x, b.pos.z - b.lastSyncPos.z).length();
+    const _mdx = b.pos.x - b.lastSyncPos.x, _mdz = b.pos.z - b.lastSyncPos.z;
+    const moved = Math.sqrt(_mdx*_mdx + _mdz*_mdz);
     b.lastSyncPos.copy(b.pos);
     const moveSpeed = moved / Math.max(dt, 0.0001); // m/s
     const walkRate = THREE.MathUtils.clamp(moveSpeed / 4.0, 0, 1.5); // 0..1.5+
@@ -5140,26 +5298,26 @@ function updateBots(dt) {
     // CRITICAL: update actual pos.y so hitbox detection matches visual position
     b.pos.y = terrainY;
 
-    // Advance walk phase based on movement
-    if (moveSpeed > 0.5) {
-      b.walkPhase = (b.walkPhase || 0) + dt * (4 + walkRate * 4);
-    } else {
-      // Idle - settle limbs back toward neutral
-      b.walkPhase = (b.walkPhase || 0) * 0.92;
-    }
-    const swing = Math.sin(b.walkPhase) * 0.5 * walkRate;
-    if (b.hipL && b.hipR) {
-      b.hipL.rotation.x =  swing;
-      b.hipR.rotation.x = -swing;
-      // arms swing opposite to legs
-      if (b.shoulderL && b.shoulderR) {
-        // Bot's "trigger arm" (right) is bent forward holding the gun;
-        // we keep it at a forward bias and only let the support arm swing.
-        b.shoulderR.rotation.x = -0.9;
-        b.shoulderL.rotation.x = -0.6 + swing * 0.6;
+    // Advance walk phase — full animation only within 90m
+    const _bdx=player?b.pos.x-player.pos.x:0,_bdz=player?b.pos.z-player.pos.z:0;
+    if (_bdx*_bdx+_bdz*_bdz < 8100) {
+      if (moveSpeed > 0.5) {
+        b.walkPhase = (b.walkPhase || 0) + dt * (4 + walkRate * 4);
+      } else {
+        b.walkPhase = (b.walkPhase || 0) * 0.92;
       }
-      // tiny vertical bob
-      b.mesh.position.y = terrainY + Math.abs(Math.sin(b.walkPhase * 2)) * 0.04 * walkRate;
+      const swing = Math.sin(b.walkPhase) * 0.5 * walkRate;
+      if (b.hipL && b.hipR) {
+        b.hipL.rotation.x =  swing;
+        b.hipR.rotation.x = -swing;
+        if (b.shoulderL && b.shoulderR) {
+          b.shoulderR.rotation.x = -0.9;
+          b.shoulderL.rotation.x = -0.6 + swing * 0.6;
+        }
+        b.mesh.position.y = terrainY + Math.abs(Math.sin(b.walkPhase * 2)) * 0.04 * walkRate;
+      } else {
+        b.mesh.position.y = terrainY;
+      }
     } else {
       b.mesh.position.y = terrainY;
     }
@@ -5229,7 +5387,11 @@ function sampleTerrainHeight(x, z) {
       cityFlat = 1.0 - t * t * (3 - 2 * t); // smoothstep
     }
   }
-  let h = rawTerrainNoise(x, z) * (1 - cityFlat);
+  const _qx = Math.round(x), _qz = Math.round(z);
+  const _nKey = (_qx + 2048) * 8192 + (_qz + 2048);
+  let _nc = _terrainNoiseCache.get(_nKey);
+  if (_nc === undefined) { _nc = rawTerrainNoise(_qx, _qz); _terrainNoiseCache.set(_nKey, _nc); }
+  let h = _nc * (1 - cityFlat);
   // Check ground-flagged bboxes (car roofs, sidewalks) — stand on top if inside
   if (world) {
     for (const bd of buildings) {
@@ -5262,7 +5424,7 @@ function hasLineOfSight(a, b) {
     const pz = a.z + dz*t;
     const py = (a.y + (b.y-a.y)*t) + 1;
     for (const bd of buildings) {
-      if (bd.userData.bbox && bd.userData.bbox.containsPoint(new THREE.Vector3(px, py, pz))) return false;
+      if (bd.userData.bbox && bd.userData.bbox.containsPoint(_losCheckVec.set(px, py, pz))) return false;
     }
   }
   return true;
@@ -6156,61 +6318,17 @@ function endGame(won) {
 }
 
 // ============================================================================
-// POST-PROCESSING
+// POST-PROCESSING — stub composer (direct render, CSS vignette, sRGB gamma via outputColorSpace)
 // ============================================================================
 function setupComposer(w, h) {
-  composer = new EffectComposer(renderer);
-
-  composer.addPass(new RenderPass(scene, camera));
-
-  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.30, 0.55, 0.88);
-  composer.addPass(bloom);
-
-  const vignette = new ShaderPass({
-    uniforms: { tDiffuse: { value: null } },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
-    `,
-    fragmentShader: `
-      uniform sampler2D tDiffuse;
-      varying vec2 vUv;
-      void main() {
-        vec4 color = texture2D(tDiffuse, vUv);
-        vec2 uv = (vUv - 0.5) * 2.0;
-        float d = dot(uv, uv);
-        float vign = 1.0 - smoothstep(0.7, 2.0, d) * 0.40;
-        gl_FragColor = vec4(color.rgb * vign, color.a);
-      }
-    `,
-  });
-  composer.addPass(vignette);
-
-  // Material shaders already apply ACESFilmic + toneMappingExposure (via renderer.toneMapping).
-  // All we need here is linear → sRGB gamma encoding so the canvas displays correctly.
-  // Using OutputPass would re-apply tone mapping a second time, making the scene very dark.
-  const gammaPass = new ShaderPass({
-    uniforms: { tDiffuse: { value: null } },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
-    `,
-    fragmentShader: `
-      uniform sampler2D tDiffuse;
-      varying vec2 vUv;
-      void main() {
-        vec4 c = texture2D(tDiffuse, vUv);
-        c.rgb = pow(max(c.rgb, 0.0), vec3(1.0 / 2.2));
-        gl_FragColor = c;
-      }
-    `,
-  });
-  composer.addPass(gammaPass);
-
-  // FXAA replaces native MSAA lost when rendering to EffectComposer framebuffers
-  fxaaPass = new ShaderPass(FXAAShader);
-  fxaaPass.material.uniforms['resolution'].value.set(1 / (w * renderer.getPixelRatio()), 1 / (h * renderer.getPixelRatio()));
-  composer.addPass(fxaaPass);
+  // EffectComposer removed for performance — saves 3 full-res framebuffer copies per frame.
+  // Bloom, shader vignette, and FXAA all eliminated. Gamma correction via renderer.outputColorSpace.
+  // Vignette is provided by the #vignette CSS overlay in style.css.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  composer = {
+    render: () => renderer.render(scene, camera),
+    setSize: (cw, ch) => { renderer.setSize(cw, ch); },
+  };
 }
 
 // ============================================================================
@@ -6236,10 +6354,16 @@ function animate() {
     g.rotation.y = t * 1.2;
     g.position.y = a.baseY + Math.sin(t * 2) * 0.06;
   }
-  // Animate loot pickups: float + spin
+  // Animate loot pickups: float + spin; hide beyond 80m to eliminate wasted draw calls
   const _lt = performance.now() / 1000;
   for (const it of lootItems) {
     if (!it.mesh) continue;
+    if (player && it.pos) {
+      const _ldx=it.pos.x-player.pos.x,_ldz=it.pos.z-player.pos.z;
+      const _ld2=_ldx*_ldx+_ldz*_ldz;
+      it.mesh.visible = _ld2 < 6400;
+      if (_ld2 > 3600) continue;
+    }
     const mm = it.mesh.userData.modelMesh;
     if (mm) {
       mm.position.y = 0.55 + Math.sin(_lt * 1.8 + it.pos.x) * 0.08;
@@ -6250,12 +6374,8 @@ function animate() {
   }
   updateBullets(dt);
   updateZone(dt);
-  // Move sun + shadow target to follow the player so shadows render only near the camera
-  if (globalThis._sunLight && player) {
-    const sun = globalThis._sunLight;
-    sun.target.position.set(player.pos.x, 0, player.pos.z);
-    sun.position.set(player.pos.x + 140, 240, player.pos.z + 90);
-  }
-  drawMinimap();
+  // Minimap throttled to ~20fps — eye can't tell the difference
+  if (!animate._mf) animate._mf = 0;
+  if (animate._mf++ % 3 === 0) drawMinimap();
   composer.render();
 }

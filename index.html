@@ -166,6 +166,17 @@
 
 <div id="clickHint" style="display:none">CLICK TO PLAY</div>
 
+<div id="loadingScreen" style="display:none;position:fixed;inset:0;z-index:500;background:#060810;flex-direction:column;align-items:center;justify-content:center;gap:28px;">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;letter-spacing:12px;color:#ff5028;">DROPZONE</div>
+  <div style="width:360px;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:4px;color:#888;margin-bottom:10px;text-align:center;" id="loadingLabel">LOADING...</div>
+    <div style="height:4px;background:#111;border:1px solid #333;">
+      <div id="loadingBar" style="height:100%;background:#ff5028;width:0%;transition:width 0.15s;"></div>
+    </div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:3px;color:#444;margin-top:8px;text-align:center;" id="loadingCount"></div>
+  </div>
+</div>
+
 <div id="endScreen">
   <h1 id="endTitle">VICTORY</h1>
   <div class="stats-end" id="endStats"></div>
