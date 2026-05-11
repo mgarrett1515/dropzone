@@ -3536,7 +3536,7 @@ function updateZone(dt) {
     const dx = e.pos.x - zone.center.x;
     const dz = e.pos.z - zone.center.z;
     if (dx*dx + dz*dz > zone.radius*zone.radius) {
-      e.takeDamage(zone.damage * dt * 6, null);
+      e.takeDamage(zone.damage * dt * 4.5, null);
     }
   });
 
@@ -4374,8 +4374,8 @@ function buildMachete(group) {
   group.add(box(0.022,0.012,0.022,M, 0,-0.108,0));  // pommel
   group.add(box(0.060,0.060,0.072,SK, 0.022,-0.048,0.022));  // hand
   group.userData.barrelTip=new THREE.Vector3(0,0.241,0);
-  group.userData.basePos=new THREE.Vector3(0.14,-0.18,-0.24);
-  group.userData.adsPos=new THREE.Vector3(0.14,-0.18,-0.24);
+  group.userData.basePos=new THREE.Vector3(0.14,-0.08,-0.24);
+  group.userData.adsPos=new THREE.Vector3(0.14,-0.08,-0.24);
 }
 function buildCrowbar(group) {
   if (CROWBAR_MODEL && _gltfGun(CROWBAR_MODEL, group, 0.50, 0, 0, 0, 0.04, -0.06, -0.10)) {
@@ -4651,7 +4651,7 @@ function updateViewmodel(dt) {
   }
   // Melee swing animation
   if (stats && stats.melee) {
-    const swingDur = 0.55; // slightly faster
+    const swingDur = 0.45;
     const elapsed = player._meleeSwing ? (performance.now()/1000 - player._meleeSwingTime) : swingDur + 1;
     if (player._meleeSwing && elapsed > swingDur) {
       player._meleeSwing = false;
@@ -4670,28 +4670,33 @@ function updateViewmodel(dt) {
     if (player._meleeSwing) {
       const t = Math.min(elapsed / swingDur, 1);
 
-      const S1_END_X = -1.6, S1_END_Z = 1.2;
+      const S1_END_X = -2.0, S1_END_Z = 1.4;
 
       const cnt = (player._meleeSwingCount || 0);
       if (cnt % 2 === 1) {
-        // Swing 1: smooth windup (0→0.35) then smooth slash (0.35→1)
-        // Use smoothstep so there's no hard velocity jump at t=0.35
+        // Swing 1: windup raises arm upper-right, slash arcs down-left
         const windupT  = Math.min(t / 0.22, 1);
         const slashT   = Math.max((t - 0.22) / 0.78, 0);
         const wu = smoothstep(windupT);
-        const sl = easeIn(slashT);
+        const sl = smoothstep(slashT);
 
-        viewmodel.rotation.x = wu * 0.5 + sl * (S1_END_X - 0.5);
-        viewmodel.rotation.z = wu * -0.9 + sl * (S1_END_Z + 0.9);
-        viewmodel.rotation.y = wu * -0.2 + sl * 0.2;
-        viewmodel.position.x = 0.14 + wu * 0.10 - sl * 0.22;
-        viewmodel.position.y = -0.20 + wu * 0.08 - sl * 0.08;
+        // For combos (cnt>1) start from previous swing endpoint for smooth continuation
+        const prevX  = cnt > 1 && player._meleeEndX  !== undefined ? player._meleeEndX  : 0;
+        const prevZ  = cnt > 1 && player._meleeEndZ  !== undefined ? player._meleeEndZ  : 0;
+        const prevPX = cnt > 1 && player._meleeEndPX !== undefined ? player._meleeEndPX : 0.14;
+        const prevPY = cnt > 1 && player._meleeEndPY !== undefined ? player._meleeEndPY : -0.08;
+
+        viewmodel.rotation.x = prevX  + wu * (0.55 - prevX)  + sl * (S1_END_X - 0.55);
+        viewmodel.rotation.z = prevZ  + wu * (-1.1 - prevZ)  + sl * (S1_END_Z  + 1.1);
+        viewmodel.rotation.y = wu * -0.2 + sl * 0.3;
+        viewmodel.position.x = prevPX + wu * (0.38 - prevPX) - sl * 0.53;
+        viewmodel.position.y = prevPY + wu * (0.06 - prevPY) - sl * 0.22;
 
       } else {
-        // Swing 2: smooth tip-to-flat (0→0.30) then smooth position sweep (0.30→1)
+        // Swing 2: flatten blade then sweep left→right (horizontal backhand)
         const startX  = player._meleeEndX  !== undefined ? player._meleeEndX  : S1_END_X;
         const startZ  = player._meleeEndZ  !== undefined ? player._meleeEndZ  : S1_END_Z;
-        const startPX = player._meleeEndPX !== undefined ? player._meleeEndPX : 0.02;
+        const startPX = player._meleeEndPX !== undefined ? player._meleeEndPX : -0.15;
 
         const flatT  = Math.min(t / 0.30, 1);
         const sweepT = Math.max((t - 0.30) / 0.70, 0);
@@ -4699,17 +4704,18 @@ function updateViewmodel(dt) {
         const sw = smoothstep(sweepT);
 
         // x=-PI/2 rotates Y-axis blade to point forward (along -Z), flat and parallel to ground
-        // y=PI/2 rotates the blade so the sharp edge faces the enemy (not the flat face)
+        // y=-PI/2 rotates so the sharp edge faces the enemy during left→right sweep
         const FLAT_X = -Math.PI / 2;
-        const FLAT_Y =  Math.PI / 2;
+        const FLAT_Y = -Math.PI / 2;
         viewmodel.rotation.x = startX + fl * (FLAT_X - startX);
         viewmodel.rotation.z = startZ - fl * startZ; // zero out z
-        viewmodel.rotation.y =           fl * FLAT_Y; // rotate so edge faces out
+        viewmodel.rotation.y =           fl * FLAT_Y;
 
         // Sweep hand left to right
-        const SWEEP_START = -0.15, SWEEP_END = 0.45;
+        const SWEEP_START = -0.20, SWEEP_END = 0.45;
         viewmodel.position.x = (startPX + fl * (SWEEP_START - startPX)) + sw * (SWEEP_END - SWEEP_START);
         viewmodel.position.y = -0.20;
+        viewmodel.position.z = THREE.MathUtils.lerp(viewmodel.position.z, -0.32, fl);
       }
 
       viewmodel.position.z -= 0.03 * Math.sin(t * Math.PI);
@@ -4719,7 +4725,8 @@ function updateViewmodel(dt) {
       viewmodel.rotation.y = THREE.MathUtils.lerp(viewmodel.rotation.y, 0, lerpSpeed);
       viewmodel.rotation.z = THREE.MathUtils.lerp(viewmodel.rotation.z, 0, lerpSpeed);
       viewmodel.position.x = THREE.MathUtils.lerp(viewmodel.position.x, 0.14, lerpSpeed);
-      viewmodel.position.y = THREE.MathUtils.lerp(viewmodel.position.y, -0.20, lerpSpeed);
+      viewmodel.position.y = THREE.MathUtils.lerp(viewmodel.position.y, -0.08, lerpSpeed);
+      viewmodel.position.z = THREE.MathUtils.lerp(viewmodel.position.z, -0.24, lerpSpeed);
     }
   }
 
