@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -100,8 +100,14 @@ let UMP45_MODEL    = null; let _ump45LoadPromise   = null;
 let BERETTA_MODEL  = null; let _berettaLoadPromise = null;
 let IZH27_MODEL    = null; let _izh27LoadPromise   = null;
 let SPAS12_MODEL   = null; let _spas12LoadPromise  = null;
+let DEAGLE_MODEL   = null; let _deagleLoadPromise = null;
+let KNIFE_MODEL    = null; let _knifeLoadPromise  = null;
+let BAT_MODEL      = null; let _batLoadPromise    = null;
+let CROWBAR_MODEL  = null; let _crowbarLoadPromise= null;
 let BARRETT_MODEL  = null; let _barrettLoadPromise = null;
 let P90_MODEL      = null; let _p90LoadPromise    = null;
+let TESLA_MODEL      = null; let _teslaLoadPromise      = null;
+let LOWPOLYCAR_MODEL = null; let _lowpolycarLoadPromise = null;
 
 function _launchWithErrorCatch(fn) {
   settings.gamertag = (document.getElementById('gamertagInput').value.trim().toUpperCase() || 'PLAYER');
@@ -222,7 +228,19 @@ function preloadP90() {
     .then(s => { P90_MODEL = s; });
   return _p90LoadPromise;
 }
-preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90();
+function preloadDeagle() {
+  if (_deagleLoadPromise) return _deagleLoadPromise;
+  const l = new GLTFLoader();
+  _deagleLoadPromise = new Promise((r, j) => l.load('/weapons/deagle/scene.glb', g => r(g.scene), null, j))
+    .then(s => { DEAGLE_MODEL = s; });
+  return _deagleLoadPromise;
+}
+function preloadKnife()   { if (_knifeLoadPromise)   return _knifeLoadPromise;   const l=new GLTFLoader(); _knifeLoadPromise   = new Promise((r,j)=>l.load('/weapons/knife/scene.glb',        g=>r(g.scene),null,j)).then(s=>{KNIFE_MODEL   =s;}); return _knifeLoadPromise;   }
+function preloadBat()     { if (_batLoadPromise)     return _batLoadPromise;     const l=new GLTFLoader(); _batLoadPromise     = new Promise((r,j)=>l.load('/weapons/baseball_bat/scene.glb', g=>r(g.scene),null,j)).then(s=>{BAT_MODEL     =s;}); return _batLoadPromise;     }
+function preloadCrowbar() { if (_crowbarLoadPromise) return _crowbarLoadPromise; const l=new GLTFLoader(); _crowbarLoadPromise = new Promise((r,j)=>l.load('/weapons/crowbar/scene.glb',     g=>r(g.scene),null,j)).then(s=>{CROWBAR_MODEL =s;}); return _crowbarLoadPromise; }
+function preloadTesla() { if (_teslaLoadPromise) return _teslaLoadPromise; const l=new GLTFLoader(); _teslaLoadPromise = new Promise((r,j)=>l.load('/vehicles/tesla.glb', g=>r(g.scene),null,j)).then(s=>{TESLA_MODEL=s;}); return _teslaLoadPromise; }
+function preloadLowPolyCar() { if (_lowpolycarLoadPromise) return _lowpolycarLoadPromise; const l=new GLTFLoader(); _lowpolycarLoadPromise = new Promise((r,j)=>l.load('/vehicles/lowpolycar.glb', g=>r(g.scene),null,j)).then(s=>{LOWPOLYCAR_MODEL=s;}); return _lowpolycarLoadPromise; }
+preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadTesla(); preloadLowPolyCar();
 
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
@@ -254,7 +272,7 @@ const MAP = { size: 900 };
 // ----- Weapons / Attachments definitions -----
 const WEAPONS = {
   pistol: { name:'P92',     dmg:18, rpm:380, mag:15, reserve:30,  recoil:0.6, spread:0.025, range:80,  adsZoom:1.4, auto:false, slot:3, color:0x666666 },
-  deagle: { name:'DEAGLE',  dmg:55, rpm:80,  mag:7,  reserve:14,  recoil:2.5, spread:0.012, range:150, adsZoom:2.0, auto:false, slot:3, color:0x888888 },
+  deagle: { name:'DEAGLE',  dmg:55, rpm:80,  mag:7,  reserve:14,  recoil:2.5, spread:0.012, range:150, adsZoom:2.3, auto:false, slot:3, color:0x888888 },
   ar:     { name:'M416',    dmg:25, rpm:680, mag:30, reserve:60,  recoil:1.2, spread:0.04,  range:200, adsZoom:1.8, auto:true,  slot:1, color:0x4a4a55 },
   ak:     { name:'AK47',    dmg:32, rpm:600, mag:30, reserve:60,  recoil:1.6, spread:0.05,  range:180, adsZoom:1.8, auto:true,  slot:1, color:0x5a4a32 },
   smg:    { name:'UMP',     dmg:20, rpm:760, mag:30, reserve:60,  recoil:0.8, spread:0.06,  range:90,  adsZoom:1.5, auto:true,  slot:1, color:0x554a3a },
@@ -1762,10 +1780,52 @@ function makeCityBuilding(cx, cz, blockSize) {
 }
 
 // ----- Cars -----
+function _placeCarModel(model, x, z, rot, carY) {
+  const car = SkeletonUtils.clone(model);
+  car.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  car.updateMatrixWorld(true);
+  const b0 = new THREE.Box3().setFromObject(car);
+  const s0 = new THREE.Vector3(); b0.getSize(s0);
+  const longestSide = Math.max(s0.x, s0.z);
+  if (!(longestSide > 0)) return null;
+  car.scale.setScalar(4.2 / longestSide);
+  car.updateMatrixWorld(true);
+  const b1 = new THREE.Box3().setFromObject(car);
+  const ctr = new THREE.Vector3(); b1.getCenter(ctr);
+  car.position.set(-ctr.x, -b1.min.y, -ctr.z);
+  const grp = new THREE.Group();
+  grp.add(car);
+  grp.position.set(x, carY, z);
+  grp.rotation.y = rot;
+  scene.add(grp);
+  return grp;
+}
 const CAR_COLORS = [
   0x2a2a30, 0x4a4a55, 0x701a1a, 0x223340, 0x6a4a30, 0x444844, 0x382a22, 0x8a2018, 0x5a5a60
 ];
 function makeCar(x, z, rot, overrideY) {
+  // Try GLTF models first — randomly pick Tesla or low poly car
+  const _carMdls = [];
+  if (TESLA_MODEL)      _carMdls.push(TESLA_MODEL);
+  if (LOWPOLYCAR_MODEL) _carMdls.push(LOWPOLYCAR_MODEL);
+  if (_carMdls.length > 0) {
+    const _gY = (overrideY !== undefined) ? overrideY
+      : (world && Math.hypot(x - world.cityCenter.x, z - world.cityCenter.y) < world.cityRadius + 20)
+        ? 0 : sampleTerrainHeight(x, z);
+    const mdl = _carMdls[Math.floor(Math.random() * _carMdls.length)];
+    const grp = _placeCarModel(mdl, x, z, rot, _gY);
+    if (grp) {
+      const cosR=Math.cos(rot), sinR=Math.sin(rot), hw=0.92, st=0.45, hl=1.0;
+      function carBB(cx,cz,hL,hLat,cA,sA,y0,y1){const ex=Math.abs(cA*hL)+Math.abs(sA*hLat),ez=Math.abs(sA*hL)+Math.abs(cA*hLat);return new THREE.Box3(new THREE.Vector3(cx-ex,y0,cz-ez),new THREE.Vector3(cx+ex,y1,cz+ez));}
+      const px=sinR*hw, pz=-cosR*hw;
+      buildings.push({userData:{bbox:carBB(x-px,z-pz,hl,st,cosR,sinR,_gY+0.1,_gY+0.95),solid:true}});
+      buildings.push({userData:{bbox:carBB(x+px,z+pz,hl,st,cosR,sinR,_gY+0.1,_gY+0.95),solid:true}});
+      const rHx=Math.abs(cosR*hw)+Math.abs(sinR*2.25), rHz=Math.abs(sinR*hw)+Math.abs(cosR*2.25);
+      buildings.push({userData:{bbox:new THREE.Box3(new THREE.Vector3(x-rHx,_gY+1.20,z-rHz),new THREE.Vector3(x+rHx,_gY+1.32,z+rHz)),ground:true}});
+      registerSearchable(grp, 'car', x, z);
+      return;
+    }
+  }
   const color = CAR_COLORS[Math.floor(Math.random()*CAR_COLORS.length)];
   // Glass and tire/trim are darker base colors that work fine vertex-colored on a single Standard material
   const tireC = 0x161616, trimC = 0x222222, lightC = 0xddd8b4, tailC = 0x882018;
@@ -3949,6 +4009,14 @@ function buildShotgun(group, attach) {
 
 // ── Desert Eagle ──────────────────────────────────────────────────────────────
 function buildDeagle(group, attach) {
+  if (DEAGLE_MODEL && _gltfGun(DEAGLE_MODEL, group, 0.30, 0, 0, 0, 0.04, -0.06, -0.22)) {
+    group.userData.barrelTip = new THREE.Vector3(0.04, 0.018, -0.560);
+    group.userData.basePos   = new THREE.Vector3(0.15, -0.17, -0.24);
+    group.userData.adsPos    = new THREE.Vector3(-0.040, -0.020, -0.14);
+    mergeGunGroup(group);
+    return group;
+  }
+  // procedural fallback
   const B=VM_MATS.bluedSteel(), BL=VM_MATS.black(),
         PL=VM_MATS.polymer(), DK=VM_MATS.darkmetal();
   const CH=new THREE.MeshStandardMaterial({color:0x888890,roughness:0.16,metalness:0.96});
@@ -4284,6 +4352,13 @@ function buildBarrett(group, attach) {
 }
 
 function buildMachete(group) {
+  if (KNIFE_MODEL && _gltfGun(KNIFE_MODEL, group, 0.32, Math.PI/2, 0, 0, 0.04, -0.06, -0.10)) {
+    group.userData.barrelTip = new THREE.Vector3(0, 0.241, 0);
+    group.userData.basePos   = new THREE.Vector3(0.14, -0.18, -0.24);
+    group.userData.adsPos    = new THREE.Vector3(0.14, -0.18, -0.24);
+    mergeGunGroup(group);
+    return group;
+  }
   const M=new THREE.MeshStandardMaterial({color:0x9ab0c0,roughness:0.15,metalness:0.94});
   const G=new THREE.MeshStandardMaterial({color:0x2a1a0a,roughness:0.90,metalness:0.0});
   const SK=new THREE.MeshStandardMaterial({color:0xc28860,roughness:0.75});
@@ -4303,6 +4378,13 @@ function buildMachete(group) {
   group.userData.adsPos=new THREE.Vector3(0.14,-0.18,-0.24);
 }
 function buildCrowbar(group) {
+  if (CROWBAR_MODEL && _gltfGun(CROWBAR_MODEL, group, 0.50, 0, 0, 0, 0.04, -0.06, -0.10)) {
+    group.userData.barrelTip = new THREE.Vector3(0, 0, -0.320);
+    group.userData.basePos   = new THREE.Vector3(0.14, -0.18, -0.24);
+    group.userData.adsPos    = new THREE.Vector3(0.14, -0.18, -0.24);
+    mergeGunGroup(group);
+    return group;
+  }
   const M=new THREE.MeshStandardMaterial({color:0x3a3a50,roughness:0.45,metalness:0.92});
   const SK=new THREE.MeshStandardMaterial({color:0xc28860,roughness:0.75});
   group.add(cylZ(0.010,0.010,0.440,M, 0,0,-0.100));
@@ -4314,6 +4396,13 @@ function buildCrowbar(group) {
   group.userData.adsPos=new THREE.Vector3(0.14,-0.18,-0.24);
 }
 function buildBat(group) {
+  if (BAT_MODEL && _gltfGun(BAT_MODEL, group, 0.50, 0, 0, -Math.PI/2, 0.04, -0.06, -0.10)) {
+    group.userData.barrelTip = new THREE.Vector3(0, 0.400, 0);
+    group.userData.basePos   = new THREE.Vector3(0.14, -0.18, -0.24);
+    group.userData.adsPos    = new THREE.Vector3(0.14, -0.18, -0.24);
+    mergeGunGroup(group);
+    return group;
+  }
   const W=new THREE.MeshStandardMaterial({color:0x9a7040,roughness:0.70,metalness:0.0});
   const T=new THREE.MeshStandardMaterial({color:0x181818,roughness:0.92,metalness:0.0});
   const SK=new THREE.MeshStandardMaterial({color:0xc28860,roughness:0.75});
