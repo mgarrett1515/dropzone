@@ -54,28 +54,21 @@ canvas { display:block; }
 
 /* CROSSHAIR */
 #crosshair {
-  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  width:22px; height:22px;
+  position:absolute; left:50%; top:50%; margin-left:-12px; margin-top:-12px;
+  width:24px; height:24px;
 }
+/* Each tick is a black 4px square containing a centered 2px white "fill".
+   No outlines, no box-shadows, no blur — entirely solid colors that the
+   compositor can't possibly re-blend differently between frames. */
+#crosshair > span,
 #crosshair::before, #crosshair::after {
-  content:''; position:absolute; background:#fff;
-  box-shadow: 0 0 0 1px #000, 0 0 4px rgba(0,0,0,0.9);
+  content:''; position:absolute; background:#000;
 }
-#crosshair::before { left:50%; top:0; width:2px; height:9px; transform:translateX(-50%); }
-#crosshair::after  { top:50%; left:0; height:2px; width:9px; transform:translateY(-50%); }
-#crosshair > .dot {
-  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  width:3px; height:3px; background:#ff5028;
-  box-shadow:0 0 0 1px #000; border-radius:50%;
-}
-#crosshair > .v2 {
-  position:absolute; left:50%; bottom:0; width:2px; height:9px; transform:translateX(-50%);
-  background:#fff; box-shadow: 0 0 0 1px #000, 0 0 4px rgba(0,0,0,0.9);
-}
-#crosshair > .h2 {
-  position:absolute; top:50%; right:0; width:9px; height:2px; transform:translateY(-50%);
-  background:#fff; box-shadow: 0 0 0 1px #000, 0 0 4px rgba(0,0,0,0.9);
-}
+#crosshair::before { left:11px; top:0;    width:2px; height:8px; background:#fff; box-sizing:content-box; border:1px solid #000; margin-left:-1px; }
+#crosshair::after  { top:11px; left:0;    width:8px; height:2px; background:#fff; box-sizing:content-box; border:1px solid #000; margin-top:-1px; }
+#crosshair > .v2   { left:11px; bottom:0; width:2px; height:8px; background:#fff; box-sizing:content-box; border:1px solid #000; margin-left:-1px; }
+#crosshair > .h2   { top:11px;  right:0;  width:8px; height:2px; background:#fff; box-sizing:content-box; border:1px solid #000; margin-top:-1px; }
+#crosshair > .dot  { left:10px; top:10px; width:3px; height:3px; background:#ff5028; box-sizing:content-box; border:1px solid #000; border-radius:50%; }
 #crosshair.ads { opacity:0; }
 
 /* SCOPE */

@@ -288,6 +288,52 @@ document.getElementById('playBtn').addEventListener('click', () => _launchWithEr
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
 
 // ============================================================================
+// PERFORMANCE — global material downgrade pass
+// ============================================================================
+// Walks the scene and replaces all MeshStandardMaterial/MeshPhysicalMaterial
+// with MeshLambertMaterial. Lambert is 5-10x cheaper per fragment on low-end
+// GPUs (no PBR math, no env map sampling). Preserves color/map/transparency/emissive.
+function _downgradeMaterials() {
+  const cache = new Map();
+  function convertOne(m) {
+    if (!m || !m.isMaterial) return m;
+    if (cache.has(m.uuid)) return cache.get(m.uuid);
+    // Skip materials we leave alone
+    if (m.isShaderMaterial || m.isMeshLambertMaterial || m.isMeshBasicMaterial) {
+      cache.set(m.uuid, m); return m;
+    }
+    if (!m.isMeshStandardMaterial && !m.isMeshPhysicalMaterial && !m.isMeshPhongMaterial) {
+      cache.set(m.uuid, m); return m;
+    }
+    const lm = new THREE.MeshLambertMaterial({
+      color: m.color ? m.color.clone() : new THREE.Color(0xffffff),
+      map: m.map || null,
+      transparent: !!m.transparent,
+      opacity: m.opacity === undefined ? 1 : m.opacity,
+      side: m.side || THREE.FrontSide,
+      emissive: m.emissive ? m.emissive.clone() : new THREE.Color(0x000000),
+      emissiveMap: m.emissiveMap || null,
+      emissiveIntensity: m.emissiveIntensity === undefined ? 1 : m.emissiveIntensity,
+      vertexColors: !!m.vertexColors,
+      alphaTest: m.alphaTest || 0,
+      depthWrite: m.depthWrite !== false,
+      depthTest: m.depthTest !== false,
+    });
+    cache.set(m.uuid, lm);
+    return lm;
+  }
+  scene.traverse(obj => {
+    if (!obj.isMesh) return;
+    if (Array.isArray(obj.material)) {
+      obj.material = obj.material.map(convertOne);
+    } else {
+      obj.material = convertOne(obj.material);
+    }
+  });
+  console.log('[PERF] Downgraded ' + cache.size + ' materials to Lambert');
+}
+
+// ============================================================================
 // GAME
 // ============================================================================
 let scene, camera, renderer, clock, composer, fxaaPass;
@@ -354,11 +400,11 @@ async function startGame() {
   scene = new THREE.Scene();
   scene.add(camera);
 
-  renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+  renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.0));
   renderer.shadowMap.enabled = false; // disabled — no objects cast shadows in our setup
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
   document.body.appendChild(renderer.domElement);
   clock = new THREE.Clock();
 
@@ -386,27 +432,17 @@ async function startGame() {
   ];
   const tc = TOD[tod];
 
-  renderer.toneMappingExposure = tc.exposure;
+  renderer.toneMappingExposure = 1.0;
   // PMREM environment removed — major per-fragment cost reduction
   setupComposer(innerWidth, innerHeight);
 
-  buildSky(tc);
+  // Sky: flat color matching fog so horizon is seamless. Cheaper than shader.
+  scene.background = new THREE.Color(tc.fogColor);
 
   // Sun / Moon
-  const sun = new THREE.DirectionalLight(tc.sunColor, tc.sunInt);
+  const sun = new THREE.DirectionalLight(tc.sunColor, tc.sunInt * 1.6);
   sun.position.set(...tc.sunPos);
-  sun.castShadow = true;
-  sun.shadow.mapSize.width = 512;
-  sun.shadow.mapSize.height = 512;
-  const sd = 50;
-  sun.shadow.camera.left = -sd; sun.shadow.camera.right = sd;
-  sun.shadow.camera.top = sd; sun.shadow.camera.bottom = -sd;
-  sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 600;
-  sun.shadow.bias = -0.0002;
-  sun.shadow.normalBias = 0.06;
-  sun.target = new THREE.Object3D();
-  scene.add(sun.target);
+  sun.castShadow = false; // shadow rendering disabled entirely
   scene.add(sun);
   globalThis._sunLight = sun;
 
@@ -417,13 +453,18 @@ async function startGame() {
     scene.add(moon);
   }
 
-  const hemi = new THREE.HemisphereLight(tc.hemiSky, tc.hemiGnd, tc.hemiInt);
+  // BRIGHT lighting setup: heavy ambient floor + strong hemisphere; Lambert has no PBR fallback
+  const hemi = new THREE.HemisphereLight(tc.hemiSky, tc.hemiGnd, 1.0);
   scene.add(hemi);
-
-  // fill light removed for shader simplicity
-  scene.add(new THREE.AmbientLight(tc.ambColor, tc.ambInt));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 
   scene.fog = new THREE.FogExp2(tc.fogColor, tc.fogDensity);
+  // Brighten the sky background a bit beyond fog color so it doesn't look gloomy
+  if (globalThis._timeOfDay !== 5) {
+    const bg = new THREE.Color(tc.fogColor);
+    bg.lerp(new THREE.Color(0xffffff), 0.25);
+    scene.background = bg;
+  }
 
   // Full progress-tracked preload — shows loading bar before game init
   const _loadBar   = document.getElementById('loadingBar');
@@ -506,6 +547,8 @@ async function startGame() {
     obj.items = generateContainerLoot(obj.type);
   }
   initZone();
+  // PERFORMANCE: downgrade all PBR materials to Lambert — biggest single GPU win
+  _downgradeMaterials();
 
   setupInput();
   preloadAudio();
@@ -546,11 +589,11 @@ async function startRange() {
   scene  = new THREE.Scene();
   scene.add(camera);
 
-  renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+  renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 0.85));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.0));
   renderer.shadowMap.enabled = false;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
   renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
   // PMREM environment removed for range — major per-fragment cost reduction
@@ -836,6 +879,7 @@ async function startRange() {
   });
   _buildCollisionCache();
   buildMuzzleFlash(); buildViewmodel(); setupInput(); preloadAudio();
+  _downgradeMaterials(); // PERFORMANCE
   window.addEventListener('resize',onResize);
   animate();
 }
@@ -845,96 +889,48 @@ async function startRange() {
 // SKY
 // ============================================================================
 function buildSky(tc) {
-  // Derive sky colors from time-of-day config
+  // Simplified sky — 2-band gradient + sun disk. ~10x cheaper fragment shader.
   const sunPos = new THREE.Vector3(...tc.sunPos).normalize();
-  const isNight = globalThis._timeOfDay === 5;
-  const isDusk  = globalThis._timeOfDay === 4;
-  const isDawn  = globalThis._timeOfDay === 0;
-
-  // Sky palette per tod
+  const isNight = globalThis._timeOfDay === 5 ? 1.0 : 0.0;
   const skyPalettes = {
-    //          zenith              mid-sky             horizon             haze/low
-    0: [ [0.12,0.14,0.28], [0.40,0.30,0.36], [0.80,0.48,0.28], [0.95,0.62,0.35] ], // dawn
-    1: [ [0.20,0.32,0.60], [0.38,0.50,0.75], [0.75,0.65,0.50], [0.90,0.78,0.58] ], // morning
-    2: [ [0.18,0.32,0.68], [0.32,0.52,0.80], [0.68,0.75,0.85], [0.82,0.84,0.88] ], // midday
-    3: [ [0.18,0.28,0.55], [0.30,0.42,0.68], [0.82,0.62,0.38], [0.95,0.80,0.60] ], // afternoon
-    4: [ [0.08,0.06,0.16], [0.24,0.14,0.22], [0.75,0.28,0.10], [0.90,0.45,0.18] ], // dusk
-    5: [ [0.02,0.03,0.08], [0.04,0.06,0.14], [0.08,0.10,0.20], [0.12,0.14,0.22] ], // night
+    0: [ [0.55,0.45,0.50], [1.00,0.75,0.50] ], // dawn
+    1: [ [0.50,0.65,0.90], [0.95,0.85,0.70] ], // morning
+    2: [ [0.45,0.65,0.95], [0.90,0.92,0.95] ], // midday
+    3: [ [0.50,0.60,0.85], [1.00,0.85,0.65] ], // afternoon
+    4: [ [0.35,0.25,0.40], [0.95,0.55,0.30] ], // dusk
+    5: [ [0.10,0.13,0.22], [0.22,0.26,0.38] ], // night
   };
-  const pal = skyPalettes[globalThis._timeOfDay];
+  const pal = skyPalettes[globalThis._timeOfDay] || skyPalettes[2];
 
-  const skyGeo = new THREE.SphereGeometry(1500, 16, 12);
+  const skyGeo = new THREE.SphereGeometry(1500, 12, 8);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
       sunDir:   { value: sunPos },
-      zenith:   { value: new THREE.Vector3(...pal[0]) },
-      midSky:   { value: new THREE.Vector3(...pal[1]) },
-      horizon:  { value: new THREE.Vector3(...pal[2]) },
-      haze:     { value: new THREE.Vector3(...pal[3]) },
-      isNight:  { value: isNight ? 1.0 : 0.0 },
-      isDuskDawn:{ value: (isDusk || isDawn) ? 1.0 : 0.0 },
+      topColor: { value: new THREE.Vector3(...pal[0]) },
+      botColor: { value: new THREE.Vector3(...pal[1]) },
+      isNight:  { value: isNight },
     },
-    vertexShader: `
+    vertexShader: `r
       varying vec3 vDir;
       void main() {
         vDir = normalize((modelMatrix * vec4(position, 1.0)).xyz);
         gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
       }
     `,
-    fragmentShader: `
+    fragmentShader: `r
       varying vec3 vDir;
-      uniform vec3 sunDir, zenith, midSky, horizon, haze;
-      uniform float isNight, isDuskDawn;
-
-      float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
-
+      uniform vec3 sunDir, topColor, botColor;
+      uniform float isNight;
       void main() {
-        float h = clamp(vDir.y, -0.05, 1.0);
-
-        // Four-band sky gradient
-        vec3 sky = mix(haze,    horizon, smoothstep(-0.05, 0.06, h));
-        sky       = mix(sky,    midSky,  smoothstep(0.04,  0.22, h));
-        sky       = mix(sky,    zenith,  smoothstep(0.18,  0.70, h));
-
-        // Rayleigh scatter near horizon (stronger at dusk/dawn)
-        float scatter = pow(max(0.0, 1.0 - h * 5.0), 2.5);
-        vec3 scatterCol = mix(vec3(0.5,0.3,0.1), vec3(0.8,0.4,0.1), isDuskDawn) * (0.2 + isDuskDawn * 0.3);
-        sky += scatterCol * scatter;
-
-        // Sun disk, corona, glow
-        float sd     = max(dot(vDir, sunDir), 0.0);
-        float disk   = smoothstep(0.9994, 0.9999, sd);
-        float corona = smoothstep(0.996,  0.9994, sd) * 0.55;
-        float glow   = pow(sd, isDuskDawn > 0.5 ? 4.0 : 10.0) * (0.15 + isDuskDawn * 0.25);
-        float halo   = pow(sd, 2.5) * 0.06 * (1.0 - isNight);
-        sky += vec3(1.0, 0.98, 0.85) * disk;
-        sky += vec3(1.0, 0.80, 0.50) * corona;
-        sky += vec3(1.0, 0.60, 0.20) * glow * (1.0 - isNight * 0.9);
-        sky += vec3(0.8, 0.65, 0.45) * halo;
-
-        // Moon (night only) — opposite of sun roughly
-        if (isNight > 0.5) {
-          vec3 moonDir = normalize(vec3(-0.3, 0.8, 0.5));
-          float md = max(dot(vDir, moonDir), 0.0);
-          sky += vec3(0.85,0.88,1.0) * smoothstep(0.9996, 0.9999, md);        // disk
-          sky += vec3(0.5, 0.55, 0.7) * pow(md, 18.0) * 0.08;                // glow
-          // Stars
-          vec3 starDir = floor(vDir * 80.0);
-          float star = hash(starDir.xy + starDir.z * 43.0);
-          float starVis = step(0.988, star) * max(0.0, vDir.y) * (1.0 - smoothstep(0.0,0.15,abs(dot(vDir,moonDir)-1.0)));
-          sky += vec3(0.9,0.92,1.0) * starVis * 0.8;
-        }
-
-        // Cloud band near horizon
-        float cloud = smoothstep(0.03, 0.10, h) * smoothstep(0.28, 0.12, h);
-        vec3 cloudCol = mix(vec3(0.55,0.45,0.42), vec3(0.90,0.86,0.82), 1.0 - isDuskDawn * 0.6);
-        sky = mix(sky, cloudCol, cloud * 0.22);
-
+        float t = smoothstep(-0.05, 0.55, vDir.y);
+        vec3 sky = mix(botColor, topColor, t);
+        float sd = max(dot(vDir, sunDir), 0.0);
+        sky += vec3(1.0, 0.95, 0.80) * smoothstep(0.997, 0.9995, sd) * (1.0 - isNight);
         gl_FragColor = vec4(sky, 1.0);
       }
-    `
+    `,
   });
   const sky = new THREE.Mesh(skyGeo, skyMat);
   sky.frustumCulled = false;
@@ -1007,16 +1003,74 @@ function makeCylGeo(r1, r2, h, segs, x=0, y=0, z=0, rx=0, ry=0, rz=0) {
   return g;
 }
 
+// Road segment between two town points — terrain-following dark strip with cars
+function makeRoadSegment(p1, p2) {
+  // Trim road endpoints generously so road doesn't pass through any house.
+  // Worst case: hood radius 42 + house corner ~9 = ~51 from hood center. Add 10 unit buffer.
+  const HOOD_R = 62;
+  let dx = p2[0] - p1[0];
+  let dz = p2[1] - p1[1];
+  const fullLen = Math.hypot(dx, dz);
+  if (fullLen < HOOD_R * 2 + 10) return; // too close, skip
+  const trimT = HOOD_R / fullLen;
+  const ax = p1[0] + dx * trimT, az = p1[1] + dz * trimT;
+  const bx = p2[0] - dx * trimT, bz = p2[1] - dz * trimT;
+  p1 = [ax, az]; p2 = [bx, bz];
+  dx = p2[0] - p1[0]; dz = p2[1] - p1[1];
+  const len = Math.hypot(dx, dz);
+  if (len < 1) return;
+  const ang = Math.atan2(dz, dx);
+  const roadW = 7;
+
+  // Subdivided strip so it can follow terrain undulations
+  const segs = Math.max(4, Math.floor(len / 18));
+  const roadGeo = new THREE.PlaneGeometry(len, roadW, segs, 1);
+  roadGeo.rotateX(-Math.PI / 2);
+  const rp = roadGeo.attributes.position;
+  const midX = (p1[0] + p2[0]) / 2;
+  const midZ = (p1[1] + p2[1]) / 2;
+  const cosA = Math.cos(-ang), sinA = Math.sin(-ang);
+  const midY = sampleTerrainHeight(midX, midZ);
+  for (let vi = 0; vi < rp.count; vi++) {
+    const lx = rp.getX(vi), lz = rp.getZ(vi);
+    const wx = midX + lx * cosA - lz * sinA;
+    const wz = midZ + lx * sinA + lz * cosA;
+    rp.setY(vi, sampleTerrainHeight(wx, wz) - midY + 0.06);
+  }
+  rp.needsUpdate = true;
+
+  if (!makeRoadSegment._mat) {
+    makeRoadSegment._mat = new THREE.MeshLambertMaterial({
+      color: 0x282826, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    });
+  }
+  const mesh = new THREE.Mesh(roadGeo, makeRoadSegment._mat);
+  mesh.position.set(midX, midY, midZ);
+  mesh.rotation.y = -ang;
+  mesh.receiveShadow = false;
+  mesh.matrixAutoUpdate = false;
+  mesh.updateMatrix();
+  scene.add(mesh);
+
+  // Cars along the road (sparse — was way too many)
+  const numCars = Math.random() < 0.55 ? 1 : 0;
+  for (let i = 0; i < numCars; i++) {
+    const t = 0.18 + Math.random() * 0.64;
+    const cx = p1[0] + dx * t + (Math.random() - 0.5) * 1.2;
+    const cz = p1[1] + dz * t + (Math.random() - 0.5) * 1.2;
+    const carRot = (Math.PI / 2) - ang + (Math.random() > 0.5 ? 0 : Math.PI);
+    makeCar(cx, cz, carRot);
+  }
+}
+
 function buildWorld() {
-  // Compute city center & footprint up front so we can color the ground accordingly
-  const cityCenter = new THREE.Vector2(
-    (Math.random()-0.5) * MAP.size * 0.4,
-    (Math.random()-0.5) * MAP.size * 0.4
-  );
-  const cityRadius = Math.min(MAP.size * 0.44, 280);
+  // Town mode — no central city. cityCenter set far away so all "distance to city" checks pass.
+  const cityCenter = new THREE.Vector2(99999, 99999);
+  const cityRadius = 0;
 
   // ----- Ground mesh — higher res, FBM-driven vertex colors -----
-  const SEGS = 128; // reduced from 200 for performance
+  const SEGS = 80; // aggressive reduction for performance
   const groundGeo = new THREE.PlaneGeometry(MAP.size*2.4, MAP.size*2.4, SEGS, SEGS);
   groundGeo.rotateX(-Math.PI/2);
   const pos = groundGeo.attributes.position;
@@ -1061,7 +1115,7 @@ function buildWorld() {
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i);
     const h = heightCache[i];
-    pos.setY(i, Math.max(h, WATER_LEVEL - 0.2)); // clamp river bed
+    pos.setY(i, Math.max(h, -1.5)); // clamp to above water level so water only shows in rare deep spots
 
     // Slope: approximate gradient from neighbours
     const row = Math.floor(i / SEG1), col = i % SEG1;
@@ -1177,42 +1231,35 @@ function buildWorld() {
     scene.add(w);
   }
 
-  // ----- BUILD THE CITY -----
-  buildCity(cityCenter.x, cityCenter.y, cityRadius);
-  flushCityMeshes(); // collapse ~50 building meshes into 2 draw calls
-
-  flushLampPosts(); // merge all lamp posts into one draw call
-  // ── Neighborhoods: one per map quadrant ─────────────────────────────────
-  // Four quadrant offsets: NW, NE, SE, SW
-  const quadrants = [
-    { sx: -1, sz: -1 }, { sx:  1, sz: -1 },
-    { sx:  1, sz:  1 }, { sx: -1, sz:  1 }
-  ];
+  // ----- TOWN LAYOUT (no central city, scattered neighborhoods + roads + cars) -----
+  const hoodPositions = [];
+  const numHoods = Math.max(22, Math.floor(MAP.size / 32));
 
   const LOOT_WEAPONS = ['pistol','ar','smg','shotgun','sr','bat','crowbar'];
 
   function spawnHouseLoot(hx, hz, facing) {
-    const itemCount = 1 + Math.floor(Math.random() * 3);
+    const itemCount = 2 + Math.floor(Math.random() * 3);
     const lootPool = [...LOOT_WEAPONS].sort(() => Math.random()-0.5);
+    // Place loot INSIDE the house. House is 12x14 centered at (hx, hz).
+    // Drop loot in a 5x5 random area around the centre — always within the 4 walls.
     for (let i = 0; i < itemCount; i++) {
-      const lx = hx + Math.cos(facing) * 2.5 + (Math.random()-0.5)*3;
-      const lz = hz + Math.sin(facing) * 2.5 + (Math.random()-0.5)*3;
-      // Get terrain Y then add floor height so loot sits on the floor, not in it
-      const ly = rawTerrainNoise(lx, lz) + 0.35;
+      const lx = hx + (Math.random() - 0.5) * 5;
+      const lz = hz + (Math.random() - 0.5) * 5;
+      const ly = sampleTerrainHeight(lx, lz) + 0.35;
       const roll = Math.random();
       if (roll < 0.45) {
         // Weighted weapon pool
         const gunRoll = Math.random();
         let wk;
-        if      (gunRoll < 0.20) wk = 'pistol';
-        else if (gunRoll < 0.38) wk = 'bat';
-        else if (gunRoll < 0.50) wk = 'deagle';
-        else if (gunRoll < 0.62) wk = 'ar';
-        else if (gunRoll < 0.72) wk = 'shotgun';
-        else if (gunRoll < 0.80) wk = 'smg';
-        else if (gunRoll < 0.87) wk = 'spas';
+        if      (gunRoll < 0.10) wk = 'pistol';
+        else if (gunRoll < 0.18) wk = 'bat';
+        else if (gunRoll < 0.28) wk = 'deagle';
+        else if (gunRoll < 0.48) wk = 'ar';
+        else if (gunRoll < 0.63) wk = 'shotgun';
+        else if (gunRoll < 0.77) wk = 'smg';
+        else if (gunRoll < 0.85) wk = 'spas';
         else if (gunRoll < 0.93) wk = 'ak';
-        else if (gunRoll < 0.96) wk = 'p90';
+        else if (gunRoll < 0.97) wk = 'p90';
         else                     wk = 'sr';
         const w = WEAPONS[wk];
         createLootMesh({ type:'weapon', key:wk, name:w.name }, lx, lz, ly);
@@ -1227,19 +1274,11 @@ function buildWorld() {
     }
   }
 
-  function makeNeighborhood(qx, qz) {
-    // Pick centre in this quadrant, away from city and map edge
-    let ncx, ncz, att = 0;
-    do {
-      const r = cityRadius + 140 + Math.random() * (MAP.size * 0.22);
-      const ang = Math.atan2(qz, qx) + (Math.random()-0.5) * 0.6;
-      ncx = cityCenter.x + Math.cos(ang) * r;
-      ncz = cityCenter.y + Math.sin(ang) * r;
-      att++;
-    } while ((Math.abs(ncx) > MAP.size*0.78 || Math.abs(ncz) > MAP.size*0.78) && att < 20);
+  function makeNeighborhood(ncx, ncz) {
+    // Position passed in directly (no quadrant logic)
 
-    const houseCount = 3 + Math.floor(Math.random() * 3); // 3-5 houses
-    const circleR = 24 + Math.random() * 8; // radius of the neighborhood circle
+    const houseCount = 5 + Math.floor(Math.random() * 5); // 5-9 houses
+    const circleR = 28 + Math.random() * 14; // radius of the neighborhood circle
     const lootHouseIdx = Math.floor(Math.random() * houseCount);
 
     for (let i = 0; i < houseCount; i++) {
@@ -1266,6 +1305,8 @@ function buildWorld() {
         makeGarbageCan(canX, canZ, Math.random() * Math.PI * 2);
       } else {
         makeBuilding(hx, hz, 12, 14, 5.5, facingAng);
+        // Every non-loot house also spawns lighter ground loot (1-2 items at the front)
+        spawnHouseLoot(hx, hz, facingAng);
       }
 
       // (path removed — never lined up correctly)
@@ -1277,17 +1318,7 @@ function buildWorld() {
       }
     }
 
-    // Gravel/dirt circle in the middle
-    const circleGeo = new THREE.CylinderGeometry(circleR * 0.55, circleR * 0.55, 0.14, 32);
-    const circleMat = new THREE.MeshStandardMaterial({
-      color: 0xa09678, roughness: 0.96, metalness: 0.0,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    });
-    const circleMesh = new THREE.Mesh(circleGeo, circleMat);
-    const cY = sampleTerrainHeight(ncx, ncz);
-    circleMesh.position.set(ncx, cY + 0.12, ncz);
-    circleMesh.receiveShadow = true;
-    scene.add(circleMesh);
+    // Gravel circle removed — looked weird in tightly-packed neighborhoods
   }
 
   function makeLootHouse(x, z, facingAng) {
@@ -1295,7 +1326,7 @@ function buildWorld() {
     const cs = BLDG_COLORS[Math.floor(Math.random()*BLDG_COLORS.length)];
     const wallC = cs.wall, roofC = cs.roof, accentC = cs.accent;
     const windowC = 0x2a3a4a, trimC = 0x222428;
-    const groundY = rawTerrainNoise(x, z);
+    const groundY = sampleTerrainHeight(x, z); // matches visible terrain (clamped)
     const doorW = 1.8, doorH = 3.8; // much taller door
     const sideW = (w - doorW) / 2;
 
@@ -1384,8 +1415,61 @@ function buildWorld() {
     // front wall (local +z, has door) — NO sentinel: keeps door entry open for LOS too
   }
 
-  for (const q of quadrants) {
-    makeNeighborhood(q.sx, q.sz);
+  // Generate scattered neighborhood positions across the whole map
+  for (let i = 0; i < numHoods; i++) {
+    let nx, nz, tries = 0;
+    do {
+      nx = (Math.random() - 0.5) * MAP.size * 1.0;
+      nz = (Math.random() - 0.5) * MAP.size * 1.0;
+      tries++;
+    } while (hoodPositions.some(p => Math.hypot(p[0]-nx, p[1]-nz) < 95) && tries < 30);
+    hoodPositions.push([nx, nz]);
+    makeNeighborhood(nx, nz);
+  }
+
+  // Distance from point p to line segment a→b (used to skip roads that pass through other hoods)
+  function _ptToSeg(p, a, b) {
+    const sdx = b[0] - a[0], sdz = b[1] - a[1];
+    const l2 = sdx*sdx + sdz*sdz;
+    if (l2 < 0.001) return Math.hypot(p[0]-a[0], p[1]-a[1]);
+    let t = ((p[0]-a[0]) * sdx + (p[1]-a[1]) * sdz) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a[0] + sdx*t, cz = a[1] + sdz*t;
+    return Math.hypot(p[0]-cx, p[1]-cz);
+  }
+
+  // Connect each hood to its 2 nearest neighbors with roads.
+  // Skip roads that would slice through ANOTHER hood.
+  const roadDone = new Set();
+  const HOOD_AVOID = 68; // road centerline stays past house extents (worst case ~51 from hood center) + 17 buffer
+  for (let i = 0; i < hoodPositions.length; i++) {
+    const candidates = [];
+    for (let j = 0; j < hoodPositions.length; j++) {
+      if (i === j) continue;
+      const d = Math.hypot(hoodPositions[j][0]-hoodPositions[i][0], hoodPositions[j][1]-hoodPositions[i][1]);
+      candidates.push({ j, d });
+    }
+    candidates.sort((a, b) => a.d - b.d);
+    let connected = 0;
+    for (const { j, d } of candidates) {
+      if (connected >= 2 || d > 280) break;
+      const key = Math.min(i, j) + ':' + Math.max(i, j);
+      if (roadDone.has(key)) continue;
+
+      // Skip if road passes too close to a different hood
+      let crossesHood = false;
+      for (let k = 0; k < hoodPositions.length; k++) {
+        if (k === i || k === j) continue;
+        if (_ptToSeg(hoodPositions[k], hoodPositions[i], hoodPositions[j]) < HOOD_AVOID) {
+          crossesHood = true; break;
+        }
+      }
+      if (crossesHood) continue;
+
+      roadDone.add(key);
+      makeRoadSegment(hoodPositions[i], hoodPositions[j]);
+      connected++;
+    }
   }
 
   // Lone loot houses scattered outside city
@@ -1419,7 +1503,7 @@ function buildWorld() {
   }
 
   // Forest clusters — dense groups of trees
-  const forestCount = 8 + Math.floor(Math.random() * 4);
+  const forestCount = 18 + Math.floor(Math.random() * 8);
   for (let f = 0; f < forestCount; f++) {
     const [fx, fz] = randPos();
     if (inCity(fx, fz, 60)) continue;
@@ -1449,7 +1533,7 @@ function buildWorld() {
   }
 
   // Scattered solo/pair trees outside forests
-  const soloTrees = Math.floor(MAP.size * 0.10);
+  const soloTrees = Math.floor(MAP.size * 0.25);
   for (let i = 0; i < soloTrees; i++) {
     const [tx, tz] = randPos();
     if (inCity(tx, tz, 20)) continue;
@@ -1457,7 +1541,7 @@ function buildWorld() {
     if (th < WATER_LEVEL_VEG + 1.0) continue;
     makeTree(tx, tz);
     // Occasionally a companion tree nearby
-    if (Math.random() < 0.35) {
+    if (Math.random() < 0.65) {
       makeTree(tx + (Math.random()-0.5)*6, tz + (Math.random()-0.5)*6);
     }
   }
@@ -1486,7 +1570,7 @@ function buildWorld() {
   }
 
   // Bushes — near water, forest edges, open fields
-  const bushCount = Math.floor(MAP.size * 0.18);
+  const bushCount = Math.floor(MAP.size * 0.40);
   for (let i = 0; i < bushCount; i++) {
     const [bx, bz] = randPos();
     if (inCity(bx, bz, 55)) continue;
@@ -1523,7 +1607,7 @@ function buildCity(cx, cz, radius) {
     color: 0x38363c, roughness: 0.94, metalness: 0.0,
     polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
   });
-  const lineMat = new THREE.MeshBasicMaterial({ color: 0xc8b850 });
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0x8a7a30, fog: true });
 
   // Asphalt base: subdivided plane that conforms to the actual terrain at each vertex
   // so it never floats above or dips below the ground mesh.
@@ -1626,8 +1710,8 @@ function buildCity(cx, cz, radius) {
   // Road centre lines — one dashed line per street, clipped to city radius
   // Each street runs between adjacent cell blocks; draw per-block-pair segment
   const lineMat2 = new THREE.MeshBasicMaterial({
-    color: 0xd4c840,
-    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    color: 0x8a7a30, // muted to not pop through fog
+    fog: true,
   });
   // Vertical streets (run N-S, one per column boundary)
   for (let i=1; i<cellsAcross; i++) {
@@ -1694,10 +1778,10 @@ function buildCity(cx, cz, radius) {
       if (Math.hypot(blockCx-cx,blockCz-cz)>radius-4) continue;
       const sX=Math.max(1,Math.floor((blockSize*0.7)/SLOT_LEN));
       const sZ=Math.max(1,Math.floor((blockSize*0.7)/SLOT_LEN));
-      if (Math.random()<0.18) tryPlaceKerbCar(blockCx-(sX-1)*SLOT_LEN/2+Math.floor(Math.random()*sX)*SLOT_LEN, blockCz+blockSize/2+kerbOffset, Math.PI/2);
-      if (Math.random()<0.18) tryPlaceKerbCar(blockCx-(sX-1)*SLOT_LEN/2+Math.floor(Math.random()*sX)*SLOT_LEN, blockCz-blockSize/2-kerbOffset, Math.PI/2);
-      if (Math.random()<0.18) tryPlaceKerbCar(blockCx+blockSize/2+kerbOffset, blockCz-(sZ-1)*SLOT_LEN/2+Math.floor(Math.random()*sZ)*SLOT_LEN, 0);
-      if (Math.random()<0.18) tryPlaceKerbCar(blockCx-blockSize/2-kerbOffset, blockCz-(sZ-1)*SLOT_LEN/2+Math.floor(Math.random()*sZ)*SLOT_LEN, 0);
+      if (Math.random()<0.09) tryPlaceKerbCar(blockCx-(sX-1)*SLOT_LEN/2+Math.floor(Math.random()*sX)*SLOT_LEN, blockCz+blockSize/2+kerbOffset, Math.PI/2);
+      if (Math.random()<0.09) tryPlaceKerbCar(blockCx-(sX-1)*SLOT_LEN/2+Math.floor(Math.random()*sX)*SLOT_LEN, blockCz-blockSize/2-kerbOffset, Math.PI/2);
+      if (Math.random()<0.09) tryPlaceKerbCar(blockCx+blockSize/2+kerbOffset, blockCz-(sZ-1)*SLOT_LEN/2+Math.floor(Math.random()*sZ)*SLOT_LEN, 0);
+      if (Math.random()<0.09) tryPlaceKerbCar(blockCx-blockSize/2-kerbOffset, blockCz-(sZ-1)*SLOT_LEN/2+Math.floor(Math.random()*sZ)*SLOT_LEN, 0);
     }
   }
 
@@ -2298,7 +2382,7 @@ function makeParkingLot(cx, cz, blockSize, baseY) {
       scene.add(stop);
 
       // Spawn a car in this spot
-      if (Math.random() < 0.45) {
+      if (Math.random() < 0.22) {
         makeCar(spotX, rz, rot, topY); // pass explicit Y so car sits on lot surface
       }
     }
@@ -2332,28 +2416,44 @@ function makeBuilding(x, z, fixedW, fixedD, fixedH, rotY) {
   const cs = BLDG_COLORS[Math.floor(Math.random()*BLDG_COLORS.length)];
   const wallC = cs.wall, roofC = cs.roof, accentC = cs.accent;
   const trimC = 0x222428;
-  const doorC = 0x3a2820;
   const windowC = 0x2a3a4a;
 
-  // Sit on the actual terrain height at this position
-  const groundY = rawTerrainNoise(x, z);
+  // Sit on the actual terrain height at this position (matches visible clamped mesh)
+  const groundY = sampleTerrainHeight(x, z);
 
   const parts = [];
-  // Main walls
-  parts.push({ geo: makeBoxGeo(w, h, d, 0, h/2, 0), color: wallC });
+  // ── HOLLOW interior: 4 walls with a door opening on the front (+Z) face ──
+  const doorW = 1.8, doorH = Math.min(3.8, h - 0.4);
+  const sideW = (w - doorW) / 2;
+  // Left + right walls (full)
+  parts.push({ geo: makeBoxGeo(0.4, h, d, -w/2, h/2, 0), color: wallC });
+  parts.push({ geo: makeBoxGeo(0.4, h, d,  w/2, h/2, 0), color: wallC });
+  // Back wall (full)
+  parts.push({ geo: makeBoxGeo(w, h, 0.4, 0, h/2, -d/2), color: wallC });
+  // Front wall — left strip, right strip, lintel above door
+  parts.push({ geo: makeBoxGeo(sideW, h, 0.4, -(doorW/2+sideW/2), h/2, d/2), color: wallC });
+  parts.push({ geo: makeBoxGeo(sideW, h, 0.4,  (doorW/2+sideW/2), h/2, d/2), color: wallC });
+  if (doorH < h - 0.2) {
+    parts.push({ geo: makeBoxGeo(doorW, h-doorH, 0.4, 0, doorH+(h-doorH)/2, d/2), color: wallC });
+  }
+  // Door frame trim
+  parts.push({ geo: makeBoxGeo(doorW+0.15, 0.12, 0.08, 0, doorH, d/2+0.05), color: trimC });
+  parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08, -(doorW/2), doorH/2, d/2+0.05), color: trimC });
+  parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08,  (doorW/2), doorH/2, d/2+0.05), color: trimC });
+
   // Foundation
   parts.push({ geo: makeBoxGeo(w+0.4, 0.6, d+0.4, 0, 0.3, 0), color: accentC });
 
-  // Windows on each side (just thin boxes flush with walls)
+  // Windows on sides and back (NOT front — door is there)
   const winRows = h > 6 ? 2 : 1;
-  const winCols = Math.max(1, Math.floor(w / 4));
   const winColsZ = Math.max(1, Math.floor(d / 4));
+  const winColsX = Math.max(1, Math.floor(w / 4));
   const winW = 1.0, winH = 1.2;
   for (let r=0; r<winRows; r++) {
     const wy = (r === 0) ? h*0.32 : h*0.65;
-    for (let c=0; c<winCols; c++) {
-      const wx = -w/2 + (w/(winCols+1)) * (c+1);
-      parts.push({ geo: makeBoxGeo(winW, winH, 0.04, wx, wy,  d/2 + 0.025), color: windowC });
+    // Back face windows only (front has the door)
+    for (let c=0; c<winColsX; c++) {
+      const wx = -w/2 + (w/(winColsX+1)) * (c+1);
       parts.push({ geo: makeBoxGeo(winW, winH, 0.04, wx, wy, -d/2 - 0.025), color: windowC });
     }
     for (let c=0; c<winColsZ; c++) {
@@ -2362,42 +2462,34 @@ function makeBuilding(x, z, fixedW, fixedD, fixedH, rotY) {
       parts.push({ geo: makeBoxGeo(0.04, winH, winW,  w/2 + 0.025, wy, wz), color: windowC });
     }
   }
-  // Door — taller so it looks walkable
-  parts.push({ geo: makeBoxGeo(1.4, 2.6, 0.06, 0, 1.3, d/2 + 0.04), color: doorC });
-  parts.push({ geo: makeBoxGeo(1.6, 2.8, 0.04, 0, 1.4, d/2 + 0.02), color: trimC });
 
   // Roof: flat parapet (50%) or simple hip/shed (50%)
   const roofType = Math.random();
   if (roofType < 0.5) {
-    // Flat roof with parapet
     parts.push({ geo: makeBoxGeo(w+0.3, 0.25, d+0.3, 0, h + 0.12, 0), color: roofC });
     parts.push({ geo: makeBoxGeo(w+0.5, 0.5, d+0.5, 0, h + 0.25, 0), color: accentC });
     parts.push({ geo: makeBoxGeo(w-0.2, 0.5, d-0.2, 0, h + 0.25, 0), color: roofC });
   } else {
-    // Hip roof: four trapezoidal slabs meeting at a ridge
-    const rh = 1.2 + Math.random()*1.4; // ridge height
+    const rh = 1.2 + Math.random()*1.4;
     const overhang = 0.4;
     const W = w + overhang*2, D = d + overhang*2;
-    // Ridge runs along Z axis, length = d - some offset each end
     const ridgeLen = D * 0.55;
-    // Two long slopes (front/back, tilt around X)
     const slopeAngleX = Math.atan2(rh, D/2 - ridgeLen*0.05);
     const slopeLen = Math.sqrt((D/2)*(D/2) + rh*rh);
     parts.push({ geo: makeBoxGeo(W, 0.22, slopeLen, 0, h + rh/2,  D/4, slopeAngleX, 0, 0), color: roofC });
     parts.push({ geo: makeBoxGeo(W, 0.22, slopeLen, 0, h + rh/2, -D/4, -slopeAngleX, 0, 0), color: roofC });
-    // Two end slopes (left/right, tilt around Z)
     const slopeAngleZ = Math.atan2(rh, W/2);
     const slopeLenZ = Math.sqrt((W/2)*(W/2) + rh*rh);
     parts.push({ geo: makeBoxGeo(slopeLenZ, 0.22, ridgeLen,  W/4, h + rh/2, 0, 0, 0, -slopeAngleZ), color: roofC });
     parts.push({ geo: makeBoxGeo(slopeLenZ, 0.22, ridgeLen, -W/4, h + rh/2, 0, 0, 0,  slopeAngleZ), color: roofC });
   }
 
-  // Foundation slab extending below ground to fill terrain interpolation gaps
+  // Foundation slab below ground
   parts.push({ geo: makeBoxGeo(w+0.8, 2.5, d+0.8, 0, -1.25 + 0.1, 0), color: 0x2a2828 });
-  // Build merged mesh with shared material
+
   if (!makeBuilding._mat) {
-    makeBuilding._mat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.88, metalness: 0.04,
+    makeBuilding._mat = new THREE.MeshLambertMaterial({
+      vertexColors: true,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     });
   }
@@ -2410,12 +2502,25 @@ function makeBuilding(x, z, fixedW, fixedD, fixedH, rotY) {
   mesh.receiveShadow = true;
   scene.add(mesh);
 
-  // Collision bbox
-  const bbox = new THREE.Box3(
-    new THREE.Vector3(x - w/2, groundY, z - d/2),
-    new THREE.Vector3(x + w/2, groundY + h, z + d/2)
-  );
-  buildings.push({ userData:{ bbox, solid: true } });
+  // LOS-blocking sentinels for 3 walls (skip front where door is). losOnly = bots can't see through but player can pass.
+  const halfW = (w / 2) * 1.05, halfD = (d / 2) * 1.05;
+  const wallThick = 0.5;
+  function addWallSentinel(cx, cz, ww, wd) {
+    const obj = new THREE.Object3D();
+    obj.userData.bbox = new THREE.Box3(
+      new THREE.Vector3(cx - ww/2, groundY - 0.3, cz - wd/2),
+      new THREE.Vector3(cx + ww/2, groundY + h + 0.5, cz + wd/2)
+    );
+    obj.userData.losOnly = true;
+    buildings.push(obj);
+  }
+  const facingAng = rotY || 0;
+  const cosR = Math.cos(facingAng), sinR = Math.sin(facingAng);
+  function rotPos(lx, lz) { return { x: x + lx*cosR - lz*sinR, z: z + lx*sinR + lz*cosR }; }
+  const lwp = rotPos(-halfW, 0); addWallSentinel(lwp.x, lwp.z, wallThick, d + wallThick*2);
+  const rwp = rotPos( halfW, 0); addWallSentinel(rwp.x, rwp.z, wallThick, d + wallThick*2);
+  const bwp = rotPos(0, -halfD); addWallSentinel(bwp.x, bwp.z, w + wallThick*2, wallThick);
+  // front wall: no sentinel — door area is open
 }
 
 // ----- Trees: collect into batches, merged at end of world build -----
@@ -5374,24 +5479,37 @@ function rawTerrainNoise(x, z) {
 function sampleTerrainHeight(x, z) {
   // Shooting range — perfectly flat floor at y=0
   if (globalThis._rangeMode) return 0;
-  // Mirrors ground mesh formula exactly — smoothstep flat zone inside cityRadius
-  let cityFlat = 0;
-  if (world && world.cityCenter) {
-    const d = Math.hypot(x - world.cityCenter.x, z - world.cityCenter.y);
-    const blendStart = world.cityRadius + 30;
-    const blendEnd   = world.cityRadius + 170;
-    if (d <= blendStart) {
-      cityFlat = 1.0;
-    } else if (d < blendEnd) {
-      const t = (d - blendStart) / (blendEnd - blendStart);
-      cityFlat = 1.0 - t * t * (3 - 2 * t); // smoothstep
+  // ─── Bilinear interpolation matching the actual rendered terrain mesh ───
+  // The mesh is PlaneGeometry(MAP.size*2.4, MAP.size*2.4, SEGS=80), so cell width = MAP.size*0.03.
+  // Without this, the player gets placed at raw noise heights (which contain high-frequency
+  // detail the mesh's coarse vertex grid can't resolve), causing clipping above/below the visible ground.
+  const CELL = MAP.size * 0.03;
+  const gx0 = Math.floor(x / CELL) * CELL;
+  const gz0 = Math.floor(z / CELL) * CELL;
+  const fu = (x - gx0) / CELL;
+  const fv = (z - gz0) / CELL;
+  function _gridHeight(vx, vz) {
+    const qx2 = Math.round(vx), qz2 = Math.round(vz);
+    const k2 = (qx2 + 2048) * 8192 + (qz2 + 2048);
+    let n2 = _terrainNoiseCache.get(k2);
+    if (n2 === undefined) { n2 = rawTerrainNoise(qx2, qz2); _terrainNoiseCache.set(k2, n2); }
+    let cf2 = 0;
+    if (world && world.cityCenter) {
+      const d2 = Math.hypot(vx - world.cityCenter.x, vz - world.cityCenter.y);
+      const bS2 = world.cityRadius + 30, bE2 = world.cityRadius + 170;
+      if (d2 <= bS2) cf2 = 1.0;
+      else if (d2 < bE2) {
+        const t2 = (d2 - bS2) / (bE2 - bS2);
+        cf2 = 1.0 - t2 * t2 * (3 - 2 * t2);
+      }
     }
+    return Math.max(n2 * (1 - cf2), -1.5);
   }
-  const _qx = Math.round(x), _qz = Math.round(z);
-  const _nKey = (_qx + 2048) * 8192 + (_qz + 2048);
-  let _nc = _terrainNoiseCache.get(_nKey);
-  if (_nc === undefined) { _nc = rawTerrainNoise(_qx, _qz); _terrainNoiseCache.set(_nKey, _nc); }
-  let h = _nc * (1 - cityFlat);
+  const h00 = _gridHeight(gx0, gz0);
+  const h10 = _gridHeight(gx0 + CELL, gz0);
+  const h01 = _gridHeight(gx0, gz0 + CELL);
+  const h11 = _gridHeight(gx0 + CELL, gz0 + CELL);
+  let h = (1 - fu) * (1 - fv) * h00 + fu * (1 - fv) * h10 + (1 - fu) * fv * h01 + fu * fv * h11;
   // Check ground-flagged bboxes (car roofs, sidewalks) — stand on top if inside
   if (world) {
     for (const bd of buildings) {
