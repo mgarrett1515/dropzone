@@ -3086,6 +3086,7 @@ class Entity {
     }
     if (a.mag) mag = Math.floor(mag * ATTACHMENTS[a.mag].magMul);
     if (a.scope) zoom = ATTACHMENTS[a.scope].zoom;
+    if (this.weapon === 'p90' && (a.scope === 'reddot' || a.scope === 'holo')) zoom *= 1.2;
     return { ...w, recoil, spread, mag, adsZoom: zoom, scope: a.scope };
   }
 
@@ -4726,78 +4727,168 @@ function buildViewmodel() {
     else if (player.weapon === 'pistol')  { mountZ = -0.04; mountY = 0.062; }
     else if (player.weapon === 'deagle')  { mountZ = -0.04; mountY = 0.062; }
 
-    if (a.scope === 'reddot') {
-      // EOTech-style box-frame holographic sight
-      // Low flat body that sits right on the rail
-      const rdH = 0.028;  // housing height
-      const rdW = 0.044;  // housing width (left-right)
-      const rdL = 0.068;  // housing length (front-back)
-      const rdBot = mountY + 0.002; // bottom of housing flush with rail top
-      const rdMid = rdBot + rdH / 2;
-      const bk = VM_MATS.black();
-      const dk = VM_MATS.darkmetal();
+    const _scopeGLBs  = { reddot: REDDOT_SIGHT_MODEL, holo: HOLO_MODEL, scope2x: SCOPE2X_MODEL, scope4x: ACOG_MODEL, scope8x: SCOPE8X_MODEL };
+    const _scopeSizes = { reddot: 0.07, holo: 0.09, scope2x: 0.13, scope4x: 0.15, scope8x: 0.30 };
+    const _weaponScopeSizes = { deagle: { scope8x: 0.20, scope4x: 0.12, scope2x: 0.10, holo: 0.045, reddot: 0.06 }, pistol: { scope8x: 0.20, scope4x: 0.12, scope2x: 0.10, holo: 0.045 }, spas: { scope8x: 0.36, reddot: 0.13 }, shotgun: { holo: 0.075, reddot: 0.13 }, barrett: { reddot: 0.10 }, sr: { reddot: 0.10 }, p90: { reddot: 0.12 }, smg: { reddot: 0.14 }, ak: { reddot: 0.10, holo: 0.07 }, ar: { reddot: 0.11 } };
+    const _glbMdl = _scopeGLBs[a.scope];
 
+    if (_glbMdl) {
+      const s = SkeletonUtils.clone(_glbMdl);
+      s.traverse(c => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = false; c.userData.fromBaked = true; } });
+      // Per-scope rotation to align barrel along -Z (viewmodel forward)
+      const _scopeRots = {
+        reddot:  [0,             4.660,        0],
+        holo:    [0,             0,            0],
+        scope2x: [0,             2.576,        0],
+        scope4x: [0,             Math.PI,      0],
+        scope8x: [0,             0,            0],
+      };
+      const _weaponScopeRots = {
+        sr: {
+          scope8x: [0, 0.02,  0],
+          reddot:  [0, 4.580, 0],
+        },
+        shotgun: {
+          reddot:  [0, 4.659, 0],
+        },
+        spas: {
+          reddot:  [0, 4.791, 0],
+        },
+        deagle: {
+          reddot:  [0, 4.686, 0],
+        },
+        ak: {
+          scope4x: [0, Math.PI - 0.087,       0],
+          scope8x: [0, -0.087,                0],
+          scope2x: [0, 2.576 - 0.087,         0],
+          holo:    [0, -0.087,                0],
+          reddot:  [0, 4.721,                   0],
+        },
+      };
+      const _weaponScopeOffsets = {
+        pistol: {
+          scope4x: { x: 0.035, y: -0.0525, z: -0.165 },
+          scope8x: { x: 0.035, y: -0.0475, z: -0.165 },
+          scope2x: { x: 0.035, y: -0.05,   z: -0.165 },
+          holo:    { x: 0.035, y: -0.05,   z: -0.15  },
+          reddot:  { x: 0.035, y: -0.05,   z: -0.15  },
+        },
+        shotgun: {
+          scope4x: { x: 0.03,   y: -0.075, z: -0.04 },
+          scope8x: { x: 0.03,   y: -0.065, z: -0.06 },
+          scope2x: { x: 0.03,   y: -0.06,  z: -0.04 },
+          holo:    { x: 0.03,   y: -0.08,  z: -0.095 },
+          reddot:  { x: 0.03,   y: -0.085, z: -0.11 },
+        },
+        spas: {
+          scope4x: { x: 0.03,   y: -0.075, z: -0.26 },
+          scope8x: { x: 0.035,  y: -0.075, z: -0.305 },
+          scope2x: { x: 0.0375, y: -0.07,  z: -0.28 },
+          holo:    { x: 0.03,   y: -0.09,  z: -0.26 },
+          reddot:  { x: 0.03,   y: -0.085, z: -0.345 },
+        },
+        deagle: {
+          scope4x: { x: 0.035, y: -0.0625, z: -0.165 },
+          scope8x: { x: 0.035, y: -0.0575, z: -0.165 },
+          scope2x: { x: 0.035, y: -0.06,   z: -0.165 },
+          holo:    { x: 0.035, y: -0.06,   z: -0.165 },
+          reddot:  { x: 0.035, y: -0.065,  z: -0.165 },
+        },
+        ar: {
+          scope4x: { x: 0.035, y: 0.02, z: -0.015 },
+          scope8x: { x: 0.035, y: 0.02, z: -0.015 },
+          scope2x: { x: 0.05,  y: 0.02, z: -0.015 },
+          holo:    { x: 0.035, y: 0.02, z: -0.015 },
+          reddot:  { x: 0.035, y: 0.0125, z: -0.015 },
+        },
+        barrett: {
+          scope4x: { x: 0.03,   y: -0.085 },
+          scope8x: { x: 0.03,   y: -0.085 },
+          scope2x: { x: 0.0375, y: -0.08  },
+          holo:    { x: 0.02,   y: -0.08  },
+          reddot:  { x: 0.025,  y: -0.09  },
+        },
+        ak: {
+          scope4x: { x: 0.02, y: 0,     z: -0.04 },
+          scope8x: { x: 0.02, y: 0,     z: -0.04 },
+          scope2x: { x: 0.02, y: 0,     z: -0.04 },
+          holo:    { x: 0.02, y: -0.01, z: -0.04 },
+          reddot:  { x: 0.02, y: -0.01, z: -0.04 },
+        },
+        smg: {
+          scope4x: { x: 0.05,  y: -0.01, z: -0.205 },
+          scope8x: { x: 0.04,  y: 0,     z: -0.195 },
+          scope2x: { x: 0.06,  y: 0,     z: -0.205 },
+          holo:    { x: 0.065, y: -0.02, z: -0.215 },
+          reddot:  { x: 0.065, y: -0.030, z: -0.245 },
+        },
+        p90: {
+          scope4x: { x: 0,    y: 0.01, z: -0.235 },
+          scope8x: { x: 0.01, y: 0.01, z: -0.285 },
+          scope2x: { x: 0.01, y: 0.01, z: -0.27  },
+          holo:    { x: 0.01, y: 0,    z: -0.245 },
+          reddot:  { x: 0.035, y: -0.005, z: -0.340 },
+        },
+        sr: {
+          scope4x: { x: 0.03,   y: -0.06  },
+          scope8x: { x: 0.03,   y: -0.065 },
+          scope2x: { x: 0.0275, y: -0.055 },
+          holo:    { x: 0.03,   y: -0.065 },
+          reddot:  { x: 0.03,   y: -0.075 },
+        },
+      };
+      const _wso = ((_weaponScopeOffsets[player.weapon] || {})[a.scope]) || { x: 0, y: 0, z: 0 };
+      const _sr = ((_weaponScopeRots[player.weapon] || {})[a.scope]) || _scopeRots[a.scope] || [0, 0, 0];
+      s.rotation.set(_sr[0], _sr[1], _sr[2]);
+      s.updateMatrixWorld(true);
+      const b0 = new THREE.Box3().setFromObject(s);
+      const sz0 = new THREE.Vector3(); b0.getSize(sz0);
+      const maxDim = Math.max(sz0.x, sz0.y, sz0.z);
+      const _effectiveSize = ((_weaponScopeSizes[player.weapon] || {})[a.scope]) || (_scopeSizes[a.scope] || 0.12);
+      if (maxDim > 0) s.scale.setScalar(_effectiveSize / maxDim);
+      s.updateMatrixWorld(true);
+      const b1 = new THREE.Box3().setFromObject(s);
+      const ctr = new THREE.Vector3(); b1.getCenter(ctr);
+      const sz1 = new THREE.Vector3(); b1.getSize(sz1);
+      // Wrap clone centered at origin, then position wrapper on the rail
+      const wrapper = new THREE.Group();
+      s.position.set(-ctr.x, -ctr.y, -ctr.z);
+      wrapper.add(s);
+      // Use the short cross-section (tube radius) for Y placement, matching procedural scope logic
+      const tubeR = Math.min(sz1.x, sz1.y) / 2;
+      wrapper.position.set(_wso.x, mountY + tubeR + 0.012 + _wso.y, mountZ + (_wso.z || 0));
+      viewmodel.add(wrapper);
+      if (a.scope === 'reddot' || a.scope === 'holo') viewmodel.userData.reddotHousing = wrapper;
+    } else if (a.scope === 'reddot' || a.scope === 'holo') {
+      // Fallback: EOTech-style box sight
+      const _fbScale = ((_weaponScopeSizes[player.weapon] || {})[a.scope]) ? ((_weaponScopeSizes[player.weapon])[a.scope] / 0.07) : 1;
+      const rdH = 0.028, rdW = 0.044, rdL = 0.068;
+      const rdBot = mountY + 0.002, rdMid = rdBot + rdH / 2;
+      const bk = VM_MATS.black(), dk = VM_MATS.darkmetal();
       const housingGroup = new THREE.Group();
-
-      // Main body block
       housingGroup.add(box(rdW, rdH, rdL, bk, 0, rdMid, mountZ));
-
-      // Rear hood overhang (extends back, taller — classic EOTech look)
       housingGroup.add(box(rdW, rdH * 0.6, rdL * 0.22, bk, 0, rdMid + rdH * 0.2, mountZ + rdL * 0.39));
-
-      // Front shroud (smaller raised lip)
       housingGroup.add(box(rdW, rdH * 0.35, rdL * 0.10, bk, 0, rdMid + rdH * 0.18, mountZ - rdL * 0.45));
-
-      // Window cutout visual — very thin dark-tinted plane inside the housing
-      const winMat = new THREE.MeshBasicMaterial({
-        color: 0x223322, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide
-      });
-      const winW = rdW * 0.75, winH = rdH * 0.55;
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), winMat);
-      win.position.set(0, rdMid + rdH * 0.04, mountZ - rdL * 0.50);
-      housingGroup.add(win);
-
-      // Picatinny mount base (wider, lower)
       housingGroup.add(box(rdW * 0.85, 0.009, rdL * 0.80, dk, 0, rdBot - 0.005, mountZ));
-      // Mount clamp bolt heads on sides
       housingGroup.add(box(rdW + 0.006, 0.008, 0.012, dk, 0, rdBot + 0.004, mountZ - rdL * 0.22));
       housingGroup.add(box(rdW + 0.006, 0.008, 0.012, dk, 0, rdBot + 0.004, mountZ + rdL * 0.22));
-
-      // Battery compartment cap on rear-left
       housingGroup.add(box(0.008, rdH * 0.5, 0.014, dk, -rdW * 0.5 - 0.004, rdMid, mountZ + rdL * 0.28));
-
+      housingGroup.scale.setScalar(_fbScale);
       viewmodel.add(housingGroup);
       viewmodel.userData.reddotHousing = housingGroup;
-
-      // No 3D lens needed — the HUD overlay handles the reticle and border
     } else {
-      // Telescopic scope - tube length and radius scale with magnification
+      // Fallback: procedural telescopic scope
       const sLen = a.scope === 'scope8x' ? 0.20 : (a.scope === 'scope4x' ? 0.16 : 0.12);
       const sR   = a.scope === 'scope8x' ? 0.028 : (a.scope === 'scope4x' ? 0.025 : 0.022);
-      const scopeY = mountY + sR + 0.012; // raised above receiver
-      // Tube
-      const tube = cyl(sR, sR, sLen, VM_MATS.black(), 0, scopeY, mountZ);
-      tube.rotation.x = Math.PI/2;
-      viewmodel.add(tube);
-      // Front objective bell (slightly larger)
+      const scopeY = mountY + sR + 0.012;
+      const tube = cyl(sR, sR, sLen, VM_MATS.black(), 0, scopeY, mountZ); tube.rotation.x = Math.PI/2; viewmodel.add(tube);
       const bellLen = 0.035;
-      const bell = cyl(sR*1.3, sR*1.05, bellLen, VM_MATS.black(), 0, scopeY, mountZ - sLen/2 - bellLen/2);
-      bell.rotation.x = Math.PI/2;
-      viewmodel.add(bell);
-      // Eye bell (rear)
-      const eye = cyl(sR*1.05, sR*1.2, 0.03, VM_MATS.black(), 0, scopeY, mountZ + sLen/2 + 0.015);
-      eye.rotation.x = Math.PI/2;
-      viewmodel.add(eye);
-      // Front lens (blue tint)
-      const lens = cyl(sR*1.2, sR*1.2, 0.003, VM_MATS.lens(), 0, scopeY, mountZ - sLen/2 - bellLen - 0.002);
-      lens.rotation.x = Math.PI/2;
-      viewmodel.add(lens);
-      // Mount rings (two)
+      const bell = cyl(sR*1.3, sR*1.05, bellLen, VM_MATS.black(), 0, scopeY, mountZ - sLen/2 - bellLen/2); bell.rotation.x = Math.PI/2; viewmodel.add(bell);
+      const eye = cyl(sR*1.05, sR*1.2, 0.03, VM_MATS.black(), 0, scopeY, mountZ + sLen/2 + 0.015); eye.rotation.x = Math.PI/2; viewmodel.add(eye);
+      const lens = cyl(sR*1.2, sR*1.2, 0.003, VM_MATS.lens(), 0, scopeY, mountZ - sLen/2 - bellLen - 0.002); lens.rotation.x = Math.PI/2; viewmodel.add(lens);
       viewmodel.add(box(0.012, sR*1.6, 0.022, VM_MATS.metal(), 0, scopeY - sR*0.3, mountZ + sLen*0.28));
       viewmodel.add(box(0.012, sR*1.6, 0.022, VM_MATS.metal(), 0, scopeY - sR*0.3, mountZ - sLen*0.28));
-      // Picatinny rail under mount
       viewmodel.add(box(0.022, 0.008, sLen*0.7, VM_MATS.darkmetal(), 0, mountY + 0.010, mountZ));
-      // Adjustment turrets
       viewmodel.add(cyl(0.013, 0.013, 0.022, VM_MATS.metal(), 0, scopeY + sR + 0.008, mountZ));
       viewmodel.add(cyl(0.013, 0.013, 0.022, VM_MATS.metal(), sR + 0.008, scopeY, mountZ));
     }
