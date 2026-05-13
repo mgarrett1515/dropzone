@@ -8,6 +8,8 @@ import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { WEAPONS, ATTACHMENTS, HEAL_ITEMS } from './weapons.js';
+import { rawTerrainNoise, lerpAngle, fbm } from './math-utils.js';
 
 // Minimal in-house geometry merger that only handles the cases we actually need:
 // indexed geometries (Box/Cylinder/Circle) with identical attribute sets.
@@ -66,9 +68,58 @@ function simpleMergeIndexed(geometries) {
 // ============================================================================
 const settings = { bots:20, skill:0.7, view:'fp', shoulder:'r', mapSize:900 };
 
+// ----- Settings persistence -----
+const SETTINGS_KEY = 'dropzone.settings.v1';
+function loadPersistedSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved && typeof saved === 'object') {
+      if (Number.isFinite(saved.bots))     settings.bots     = Math.max(5, Math.min(60, saved.bots|0));
+      if (Number.isFinite(saved.skill))    settings.skill    = saved.skill;
+      if (typeof saved.view === 'string')     settings.view     = saved.view;
+      if (typeof saved.shoulder === 'string') settings.shoulder = saved.shoulder;
+      if (Number.isFinite(saved.mapSize))  settings.mapSize  = saved.mapSize|0;
+      if (typeof saved.gamertag === 'string') settings.gamertag = saved.gamertag;
+    }
+  } catch (e) {}
+}
+function savePersistedSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      bots: settings.bots, skill: settings.skill,
+      view: settings.view, shoulder: settings.shoulder,
+      mapSize: settings.mapSize, gamertag: settings.gamertag,
+    }));
+  } catch (e) {}
+}
+function _selectSegButton(id, value) {
+  document.querySelectorAll(`#${id} button`).forEach(b => {
+    b.classList.toggle('on', b.dataset.v === String(value));
+  });
+}
+function applySettingsToMenu() {
+  const botCount = document.getElementById('botCount');
+  if (botCount) {
+    botCount.value = settings.bots;
+    const v = document.getElementById('botCountVal');
+    if (v) v.textContent = settings.bots;
+  }
+  _selectSegButton('botSkill', settings.skill);
+  _selectSegButton('viewMode', settings.view);
+  _selectSegButton('shoulder', settings.shoulder);
+  _selectSegButton('mapSize',  settings.mapSize);
+  const gt = document.getElementById('gamertagInput');
+  if (gt && settings.gamertag) gt.value = settings.gamertag;
+}
+
+loadPersistedSettings();
+
 document.getElementById('botCount').addEventListener('input', e => {
   settings.bots = parseInt(e.target.value);
   document.getElementById('botCountVal').textContent = settings.bots;
+  savePersistedSettings();
 });
 function bindSeg(id, key, parser=(v)=>v) {
   document.querySelectorAll(`#${id} button`).forEach(b => {
@@ -76,6 +127,7 @@ function bindSeg(id, key, parser=(v)=>v) {
       document.querySelectorAll(`#${id} button`).forEach(x => x.classList.remove('on'));
       b.classList.add('on');
       settings[key] = parser(b.dataset.v);
+      savePersistedSettings();
     });
   });
 }
@@ -83,6 +135,18 @@ bindSeg('botSkill', 'skill', parseFloat);
 bindSeg('viewMode', 'view');
 bindSeg('shoulder', 'shoulder');
 bindSeg('mapSize', 'mapSize', parseInt);
+
+// Save gamertag on input (so it persists even if user backs out before pressing DROP IN)
+{
+  const _gt = document.getElementById('gamertagInput');
+  if (_gt) _gt.addEventListener('input', () => {
+    settings.gamertag = _gt.value.trim().toUpperCase() || undefined;
+    savePersistedSettings();
+  });
+}
+
+// Sync the menu UI to the freshly-loaded settings
+applySettingsToMenu();
 
 // Nature-model globals — declared before preloadNature() call to avoid TDZ
 let NATURE_MODELS = null;
@@ -115,6 +179,7 @@ let MUSCLECAR_MODEL      = null; let _musclecarLoadPromise      = null;
 let AMMOBOX_MODEL        = null; let _ammoboxLoadPromise        = null;
 let MEDKIT_MODEL         = null; let _medkitLoadPromise         = null;
 let BANDAGE_MODEL        = null; let _bandageLoadPromise        = null;
+let ARMOR_VEST_MODEL     = null; let _armorVestLoadPromise      = null;
 let REDDOT_SIGHT_MODEL   = null; let _reddotSightLoadPromise   = null;
 let SCOPE2X_MODEL        = null; let _scope2xLoadPromise        = null;
 let ACOG_MODEL           = null; let _acogLoadPromise           = null;
@@ -134,6 +199,7 @@ const _sv6=new THREE.Vector3(),_losCheckVec=new THREE.Vector3();
 
 function _launchWithErrorCatch(fn) {
   settings.gamertag = (document.getElementById('gamertagInput').value.trim().toUpperCase() || 'PLAYER');
+  savePersistedSettings();
   document.getElementById('menu').style.display = 'none';
   document.getElementById('clickHint').style.display = 'flex';
   const _ls = document.getElementById('loadingScreen');
@@ -273,6 +339,7 @@ function preloadMuscleCar()  { if (_musclecarLoadPromise)   return _musclecarLoa
 function preloadAmmoBox()    { if (_ammoboxLoadPromise)     return _ammoboxLoadPromise;    const l=new GLTFLoader(); _ammoboxLoadPromise    = new Promise((r,j)=>l.load('/ammo_box.glb',     g=>r(g.scene),null,j)).then(s=>{AMMOBOX_MODEL=s;});    return _ammoboxLoadPromise;    }
 function preloadMedkit()     { if (_medkitLoadPromise)      return _medkitLoadPromise;     const l=new GLTFLoader(); _medkitLoadPromise     = new Promise((r,j)=>l.load('/med_kit_red.glb',  g=>r(g.scene),null,j)).then(s=>{MEDKIT_MODEL=s;});     return _medkitLoadPromise;     }
 function preloadBandage()    { if (_bandageLoadPromise)     return _bandageLoadPromise;    const l=new GLTFLoader(); _bandageLoadPromise    = new Promise((r,j)=>l.load('/bandage_roll.glb', g=>r(g.scene),null,j)).then(s=>{BANDAGE_MODEL=s;});    return _bandageLoadPromise;    }
+function preloadArmorVest()  { if (_armorVestLoadPromise)   return _armorVestLoadPromise;  const l=new GLTFLoader(); _armorVestLoadPromise  = new Promise((r,j)=>l.load('/combat_vest.glb', g=>r(g.scene),null,j)).then(s=>{ARMOR_VEST_MODEL=s;}); return _armorVestLoadPromise;  }
 function preloadReddotSight(){ if (_reddotSightLoadPromise) return _reddotSightLoadPromise; const l=new GLTFLoader(); _reddotSightLoadPromise = new Promise((r,j)=>l.load('/sights/red_dot.glb',                        g=>r(g.scene),null,j)).then(s=>{REDDOT_SIGHT_MODEL=s;}); return _reddotSightLoadPromise; }
 function preloadScope2x()    { if (_scope2xLoadPromise)     return _scope2xLoadPromise;    const l=new GLTFLoader(); _scope2xLoadPromise    = new Promise((r,j)=>l.load('/sights/2x_scope.glb',                        g=>r(g.scene),null,j)).then(s=>{SCOPE2X_MODEL=s;});    return _scope2xLoadPromise;    }
 function preloadAcog()       { if (_acogLoadPromise)        return _acogLoadPromise;       const l=new GLTFLoader(); _acogLoadPromise       = new Promise((r,j)=>l.load('/sights/sight_acog.glb',                       g=>r(g.scene),null,j)).then(s=>{ACOG_MODEL=s;});       return _acogLoadPromise;       }
@@ -282,7 +349,7 @@ function preloadExtmag()     { if (_extmagLoadPromise)      return _extmagLoadPr
 function preloadGrip()       { if (_gripLoadPromise)        return _gripLoadPromise;       const l=new GLTFLoader(); _gripLoadPromise       = new Promise((r,j)=>l.load('/sights/low-poly_magpul_rvg.glb',      g=>r(g.scene),null,j)).then(s=>{GRIP_MODEL=s;});       return _gripLoadPromise;       }
 function preloadComp()       { if (_compLoadPromise)        return _compLoadPromise;       const l=new GLTFLoader(); _compLoadPromise       = new Promise((r,j)=>l.load('/sights/compensator.glb',              g=>r(g.scene),null,j)).then(s=>{COMP_MODEL=s;});       return _compLoadPromise;       }
 function preloadSilencerMdl(){ if (_silencerModelLoadPromise) return _silencerModelLoadPromise; const l=new GLTFLoader(); _silencerModelLoadPromise = new Promise((r,j)=>l.load('/sights/makarov_pistol_silencer.glb', g=>r(g.scene),null,j)).then(s=>{SILENCER_MODEL=s;}); return _silencerModelLoadPromise; }
-preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadLowPolyCar(); preloadToyota(); preloadRacecar(); preloadFreeLowPoly(); preloadVan(); preloadMuscleCar(); preloadAmmoBox(); preloadMedkit(); preloadBandage(); preloadReddotSight(); preloadScope2x(); preloadAcog(); preloadScope8x(); preloadHolo(); preloadExtmag(); preloadGrip(); preloadComp(); preloadSilencerMdl();
+preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadLowPolyCar(); preloadToyota(); preloadRacecar(); preloadFreeLowPoly(); preloadVan(); preloadMuscleCar(); preloadAmmoBox(); preloadMedkit(); preloadBandage(); preloadArmorVest(); preloadReddotSight(); preloadScope2x(); preloadAcog(); preloadScope8x(); preloadHolo(); preloadExtmag(); preloadGrip(); preloadComp(); preloadSilencerMdl();
 
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
@@ -340,6 +407,9 @@ let scene, camera, renderer, clock, composer, fxaaPass;
 let player, world;
 let entities = [];
 let lootItems = [];
+// Accumulated in-game time in seconds (advances only when animate() ticks).
+// Used by reload / bolt-cycle timers so they pause when the tab is hidden.
+let gameTime = 0;
 const searchableObjects = []; // dumpsters, cars, bushes that can be searched
 
 function registerSearchable(mesh, type, worldX, worldZ) {
@@ -356,39 +426,13 @@ let gameOver = false;
 let killCount = 0;
 const dobbleGolpGroups = [];
 const MAP = { size: 900 };
+// Ground mesh resolution. Higher = smoother color/slope transitions but more
+// triangles. 120 = ~14k tris on the ground (trivial on a modern GPU) and
+// halves the visible "blob" size vs. the prior 80.
+const TERRAIN_SEGS = 120;
 
-// ----- Weapons / Attachments definitions -----
-const WEAPONS = {
-  pistol: { name:'P92',     dmg:18, rpm:380, mag:15, reserve:30,  recoil:0.6, spread:0.025, range:80,  adsZoom:1.4, auto:false, slot:3, color:0x666666 },
-  deagle: { name:'DEAGLE',  dmg:55, rpm:80,  mag:7,  reserve:14,  recoil:2.5, spread:0.012, range:150, adsZoom:2.3, auto:false, slot:3, color:0x888888 },
-  ar:     { name:'M416',    dmg:25, rpm:680, mag:30, reserve:60,  recoil:1.2, spread:0.04,  range:200, adsZoom:1.8, auto:true,  slot:1, color:0x4a4a55 },
-  ak:     { name:'AK47',    dmg:32, rpm:600, mag:30, reserve:60,  recoil:1.6, spread:0.05,  range:180, adsZoom:1.8, auto:true,  slot:1, color:0x5a4a32 },
-  smg:    { name:'UMP',     dmg:20, rpm:760, mag:30, reserve:60,  recoil:0.8, spread:0.06,  range:90,  adsZoom:1.5, auto:true,  slot:1, color:0x554a3a },
-  p90:    { name:'P90',     dmg:18, rpm:900, mag:50, reserve:50,  recoil:0.6, spread:0.07,  range:80,  adsZoom:1.5, auto:true,  slot:1, color:0x3a3a4a },
-  sr:     { name:'KAR98',   dmg:80, rpm:60,  mag:5,  reserve:10,  recoil:2.2, spread:0.005, range:400, adsZoom:4.0, auto:false, slot:2, color:0x7a5a3a, bolt:true },
-  barrett:{ name:'BARRETT M82', dmg:95, rpm:100, mag:10, reserve:10, recoil:3.0, spread:0.004, range:500, adsZoom:4.0, auto:false, slot:2, color:0x2a2a2a },
-  shotgun:{ name:'S686',    dmg:10, rpm:180, mag:2,  reserve:8,   recoil:1.8, spread:0.18,  range:30,  adsZoom:1.2, auto:false, slot:1, pellets:8, color:0x4a3a2a },
-  spas:   { name:'SPAS-12', dmg:12, rpm:200, mag:8,  reserve:16,  recoil:1.6, spread:0.16,  range:35,  adsZoom:1.2, auto:false, slot:1, pellets:7, color:0x3a3a3a },
-  machete:{ name:'KNIFE',   dmg:18, rpm:150, mag:1,  reserve:0,   recoil:0,   spread:0,     range:1.8, adsZoom:1.0, auto:false, slot:4, color:0x8a9aaa, melee:true },
-  crowbar:{ name:'CROWBAR', dmg:20, rpm:90,  mag:1,  reserve:0,   recoil:0,   spread:0,     range:2.2, adsZoom:1.0, auto:false, slot:4, color:0x3a3a4a, melee:true },
-  bat:    { name:'BAT',     dmg:15, rpm:110, mag:1,  reserve:0,   recoil:0,   spread:0,     range:2.5, adsZoom:1.0, auto:false, slot:4, color:0xc8a060, melee:true }
-};
-const ATTACHMENTS = {
-  reddot:   { name:'RED DOT',   type:'scope', zoom:1.3 },
-  holo:     { name:'HOLO SIGHT', type:'scope', zoom:1.5 },
-  scope2x:  { name:'2x SCOPE',  type:'scope', zoom:2.2 },
-  scope4x:  { name:'4x SCOPE',  type:'scope', zoom:4.0 },
-  scope8x:  { name:'8x SCOPE',  type:'scope', zoom:8.0 },
-  grip:     { name:'V-GRIP',    type:'grip',  recoilMul:0.7 },
-  extmag:   { name:'EXT MAG',   type:'mag',   magMul:1.5 },
-  comp:     { name:'COMP',      type:'muzzle',recoilMul:0.85, spreadMul:0.85 },
-  silencer: { name:'SILENCER',  type:'muzzle',recoilMul:0.95, silent:true }
-};
-const HEAL_ITEMS = {
-  bandage:    { name:'BANDAGE',            heal:15,  time:3 },
-  medkit:     { name:'MEDKIT',             heal:75,  time:6 },
-  dobble_golp:{ name:'5 TIMES DOBBLE GOLP', heal:100, armor:100, time:5, legendary:true }
-};
+// Weapons / Attachments / Heal items definitions live in ./weapons.js
+// and are imported at the top of this file.
 
 // ============================================================================
 // INIT
@@ -494,6 +538,7 @@ async function startGame() {
     ['SUPPLIES',      preloadAmmoBox],
     ['SUPPLIES',      preloadMedkit],
     ['SUPPLIES',      preloadBandage],
+    ['ARMOR VEST',    preloadArmorVest],
     ['SIGHTS',        preloadReddotSight],
     ['SIGHTS',        preloadScope2x],
     ['SIGHTS',        preloadAcog],
@@ -818,6 +863,7 @@ async function startRange() {
     ['SUPPLIES',     preloadAmmoBox],
     ['SUPPLIES',     preloadMedkit],
     ['SUPPLIES',     preloadBandage],
+    ['ARMOR VEST',   preloadArmorVest],
     ['SIGHTS',       preloadReddotSight],
     ['SIGHTS',       preloadScope2x],
     ['SIGHTS',       preloadAcog],
@@ -1064,13 +1110,120 @@ function makeRoadSegment(p1, p2) {
   }
 }
 
+// Procedural ground-detail texture, cached after first generation.
+// Output is brightness-leaning (values near 1.0, with darker grass-blade strokes
+// and small specks). Designed to be multiplied by vertex colors — preserves hue
+// from the biome palette while adding sub-meter detail that breaks up the
+// "smooth blob" look of pure vertex coloring.
+let _groundDetailTexture = null;
+function _buildGroundDetailTexture() {
+  if (_groundDetailTexture) return _groundDetailTexture;
+  const SIZE = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+
+  // Base: bright noise floor so multiplied result keeps vertex hue.
+  const img = ctx.createImageData(SIZE, SIZE);
+  const data = img.data;
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const n = 0.82 + Math.random() * 0.18;          // 0.82..1.0
+    const g = (n + (Math.random() - 0.5) * 0.04);   // tiny per-channel jitter
+    const r = (n + (Math.random() - 0.5) * 0.04);
+    const b = (n + (Math.random() - 0.5) * 0.04);
+    data[i*4]     = Math.max(0, Math.min(255, Math.floor(r * 255)));
+    data[i*4 + 1] = Math.max(0, Math.min(255, Math.floor(g * 255)));
+    data[i*4 + 2] = Math.max(0, Math.min(255, Math.floor(b * 255)));
+    data[i*4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Draw with edge-wrap so the tile is seamless: each stroke is also drawn
+  // shifted by ±SIZE on x/y so anything crossing an edge appears on the other.
+  function _wrappedStroke(drawFn) {
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        ctx.save();
+        ctx.translate(ox * SIZE, oy * SIZE);
+        drawFn();
+        ctx.restore();
+      }
+    }
+  }
+
+  // Grass-blade hatching: short, near-vertical dark strokes.
+  ctx.lineWidth = 1;
+  _wrappedStroke(() => {
+    for (let i = 0; i < 4500; i++) {
+      const x = Math.random() * SIZE;
+      const y = Math.random() * SIZE;
+      const len = 2.5 + Math.random() * 4.5;
+      const lean = (Math.random() - 0.5) * 1.8;
+      ctx.strokeStyle = `rgba(40, 55, 25, ${0.15 + Math.random() * 0.18})`;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + lean, y - len);
+      ctx.stroke();
+    }
+  });
+
+  // Lighter blade highlights — caught light on blade edges.
+  _wrappedStroke(() => {
+    for (let i = 0; i < 1400; i++) {
+      const x = Math.random() * SIZE;
+      const y = Math.random() * SIZE;
+      const len = 1.8 + Math.random() * 3.0;
+      const lean = (Math.random() - 0.5) * 1.5;
+      ctx.strokeStyle = `rgba(245, 245, 210, ${0.10 + Math.random() * 0.10})`;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + lean, y - len);
+      ctx.stroke();
+    }
+  });
+
+  // Small dark specks — pebbles, dirt clumps.
+  _wrappedStroke(() => {
+    for (let i = 0; i < 2200; i++) {
+      const x = Math.random() * SIZE;
+      const y = Math.random() * SIZE;
+      const r = 0.5 + Math.random() * 1.4;
+      ctx.fillStyle = `rgba(48, 38, 28, ${0.22 + Math.random() * 0.18})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // Sparse mid-tone speckle for the in-between feel of soil between blades.
+  _wrappedStroke(() => {
+    for (let i = 0; i < 1200; i++) {
+      const x = Math.random() * SIZE;
+      const y = Math.random() * SIZE;
+      const r = 0.7 + Math.random() * 1.6;
+      ctx.fillStyle = `rgba(110, 95, 70, ${0.10 + Math.random() * 0.10})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  _groundDetailTexture = tex;
+  return tex;
+}
+
 function buildWorld() {
   // Town mode — no central city. cityCenter set far away so all "distance to city" checks pass.
   const cityCenter = new THREE.Vector2(99999, 99999);
   const cityRadius = 0;
 
   // ----- Ground mesh — higher res, FBM-driven vertex colors -----
-  const SEGS = 80; // aggressive reduction for performance
+  const SEGS = TERRAIN_SEGS;
   const groundGeo = new THREE.PlaneGeometry(MAP.size*2.4, MAP.size*2.4, SEGS, SEGS);
   groundGeo.rotateX(-Math.PI/2);
   const pos = groundGeo.attributes.position;
@@ -1134,9 +1287,9 @@ function buildWorld() {
     else { const t=(distCity-bS)/(bE-bS); cityFlat=1.0-t*t*(3-2*t); }
 
     // Noise layers for biome
-    const nb = _fbm(x*0.022 + 1.3, z*0.020 + 0.7, 3) * 0.5 + 0.5; // biome blend
-    const nd = _fbm(x*0.045 + 3.1, z*0.042 + 5.2, 2) * 0.5 + 0.5; // detail
-    const nm = _fbm(x*0.012 + 7.4, z*0.011 + 2.8, 3) * 0.5 + 0.5; // macro
+    const nb = fbm(x*0.022 + 1.3, z*0.020 + 0.7, 3) * 0.5 + 0.5; // biome blend
+    const nd = fbm(x*0.045 + 3.1, z*0.042 + 5.2, 2) * 0.5 + 0.5; // detail
+    const nm = fbm(x*0.012 + 7.4, z*0.011 + 2.8, 3) * 0.5 + 0.5; // macro
 
     let gc = new THREE.Color();
 
@@ -1197,7 +1350,16 @@ function buildWorld() {
 
   groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+  // Detail texture — tiles ~80x across the map so each tile spans ~MAP.size*2.4/80 m.
+  // Vertex colors still drive hue (biome palette); the texture adds fine grain
+  // and breaks up the smooth-blob look of pure vertex coloring.
+  const _groundTex = _buildGroundDetailTexture();
+  _groundTex.repeat.set(80, 80);
+  const groundMat = new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    map: _groundTex,
+  });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   ground.userData.isGround = true;
@@ -2887,6 +3049,8 @@ class Entity {
     this.attachments = {};  // weapon-key -> { scope, grip, mag, muzzle }
     this.lastShot = 0;
     this.reloading = false;
+    this.reloadCompleteAt = 0; // gameTime at which reload finishes; 0 = not reloading
+    this.reloadRefill = false; // true: refill mag at completion; false: pure bolt-cycle lockout
     this.shotsFired = 0;    // recoil pattern counter
     this.recoilOffset = 0;
     this.isAds = false;
@@ -3038,9 +3202,27 @@ class Entity {
       this.burstLimit    = Math.round(2 + sk * 6);    // easy=4, hard=8 shots before burst pause
       this.lastSeen = null;
       this.alertTimer = 0;
-      // give bot a starting weapon
-      const startGuns = ['pistol','deagle','smg','p90','ar','ak','shotgun','spas','sr','barrett'];
-      const wk = startGuns[Math.floor(Math.random()*startGuns.length)];
+      this.investigateTimer = 0;
+      // give bot a starting weapon. ~80% spawn with a pistol; ~20% spawn with
+      // something else, rarity-weighted within that 20%. Bots have to *find*
+      // better gear (in the future, anyway — they don't loot yet).
+      const startGuns = [
+        ['pistol',  80],   // ~80% — default landing weapon
+        ['smg',      5],
+        ['ar',       4],
+        ['ak',       3],
+        ['shotgun',  2],
+        ['p90',      2],
+        ['deagle',   1],
+        ['spas',     1],
+        ['sr',       1],
+        ['barrett',  1],   // ~1% — jackpot
+      ];
+      let _totalW = 0;
+      for (const e of startGuns) _totalW += e[1];
+      let _roll = Math.random() * _totalW;
+      let wk = startGuns[0][0];
+      for (const [g, w] of startGuns) { _roll -= w; if (_roll <= 0) { wk = g; break; } }
       this.giveWeapon(wk);
       // sometimes attach a scope to bot
       if (Math.random() < 0.4 && (wk==='ar'||wk==='ak'||wk==='sr'||wk==='barrett')) {
@@ -3067,7 +3249,10 @@ class Entity {
     if (!this.inventory[slot]) return;
     this.activeSlot = slot;
     this.weapon = this.inventory[slot];
+    // Cancel any in-flight reload — swapping weapons aborts the action
     this.reloading = false;
+    this.reloadCompleteAt = 0;
+    this.reloadRefill = false;
     if (this.isPlayer) { updateHUD(); buildViewmodel(); }
   }
 
@@ -3163,7 +3348,8 @@ class Entity {
     playSound('shoot', this.pos, this.weapon, _isSilenced);
     if (stats.bolt) {
       this.reloading = true;
-      setTimeout(() => { this.reloading = false; }, 1200);
+      this.reloadCompleteAt = gameTime + 1.2;
+      this.reloadRefill = false; // bolt cycle does not refill the mag
     }
     return true;
   }
@@ -3174,16 +3360,29 @@ class Entity {
     if (this.ammo[this.weapon] >= stats.mag) return;
     if (this.reserve[this.weapon] <= 0) return;
     this.reloading = true;
+    this.reloadCompleteAt = gameTime + 2.2;
+    this.reloadRefill = true;
     if (this.isPlayer) playSound('reload', null, this.weapon);
-    setTimeout(() => {
-      const need = stats.mag - this.ammo[this.weapon];
-      const take = Math.min(need, this.reserve[this.weapon]);
-      this.ammo[this.weapon] += take;
-      this.reserve[this.weapon] -= take;
-      this.reloading = false;
+  }
+
+  // Called every frame from animate() — finalizes any reload whose time has come.
+  tickReload() {
+    if (!this.reloading || this.reloadCompleteAt === 0) return;
+    if (gameTime < this.reloadCompleteAt) return;
+    if (this.reloadRefill && this.weapon) {
+      const stats = this.effectiveStats();
+      if (stats) {
+        const need = stats.mag - this.ammo[this.weapon];
+        const take = Math.min(need, this.reserve[this.weapon]);
+        this.ammo[this.weapon] += take;
+        this.reserve[this.weapon] -= take;
+      }
       this.shotsFired = 0;
       if (this.isPlayer) updateHUD();
-    }, 2200);
+    }
+    this.reloading = false;
+    this.reloadCompleteAt = 0;
+    this.reloadRefill = false;
   }
 
   getAimDir() {
@@ -3212,13 +3411,18 @@ class Entity {
     this.hp -= amount;
     if (this.isPlayer) {
       flashDamage();
+      if (source) showDamageDirection(source);
       playSound('hit');
       updateHUD();
     } else {
-      // bot becomes alert if shot
+      // bot becomes alert if shot — reacts instantly, keeps investigating for 8s if LOS lost
       this.aiState = 'engage';
-      this.lastSeen = source ? source.pos.clone() : this.pos.clone();
-      this.alertTimer = 8;
+      if (source) {
+        if (!this.lastSeen) this.lastSeen = new THREE.Vector3();
+        this.lastSeen.copy(source.pos);
+      }
+      this.alertTimer = 0;        // ready to fire — being shot bypasses wind-up
+      this.investigateTimer = 8;  // remember where the shot came from
     }
     if (this.hp <= 0) this.die(source);
   }
@@ -3536,13 +3740,18 @@ function createLootMesh(item, x, z, explicitY) {
       modelMesh = g;
     }
   } else if (item.type === 'armor') {
-    // Chest-plate shape: box with shoulder tabs
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.46, 0.10), mat));
-    const ls = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.10), mat);
-    ls.position.set(-0.27, 0.20, 0); g.add(ls);
-    const rs = ls.clone(); rs.position.x = 0.27; g.add(rs);
-    modelMesh = g;
+    if (ARMOR_VEST_MODEL) {
+      modelMesh = _makeGltfPickupMesh(ARMOR_VEST_MODEL, 0, 0, 0, 0.55);
+    }
+    if (!modelMesh) {
+      // Fallback while the GLB is still loading — chest plate with shoulder tabs.
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.46, 0.10), mat));
+      const ls = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.10), mat);
+      ls.position.set(-0.27, 0.20, 0); g.add(ls);
+      const rs = ls.clone(); rs.position.x = 0.27; g.add(rs);
+      modelMesh = g;
+    }
   } else {
     modelMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
   }
@@ -3706,17 +3915,20 @@ function initZone() {
     shrinkTime: 0,       // currently shrinking?
     damage: 0.5,
   };
-  // visualize zone with circle ring
-  const ringGeo = new THREE.RingGeometry(MAP.size-1, MAP.size, 64);
+  // visualize zone with circle ring — built at unit radius (1) and scaled per-frame.
+  // The ring is 1.5/radius thick at unit scale so it scales out to ~1.5 world units.
+  const ringGeo = new THREE.RingGeometry(0.9985, 1.0, 64);
   ringGeo.rotateX(-Math.PI/2);
   zone.ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color:0x00ddff, side:THREE.DoubleSide, transparent:true, opacity:0.6 }));
   zone.ring.position.y = 0.5;
+  zone.ring.scale.set(MAP.size, 1, MAP.size);
   scene.add(zone.ring);
-  // wall
-  zone.wallGeo = new THREE.CylinderGeometry(MAP.size, MAP.size, 80, 64, 1, true);
+  // wall — cylinder built at radius=1, scaled per-frame
+  const wallGeo = new THREE.CylinderGeometry(1, 1, 80, 64, 1, true);
   zone.wallMat = new THREE.MeshBasicMaterial({ color:0x0099ff, transparent:true, opacity:0.18, side:THREE.DoubleSide });
-  zone.wall = new THREE.Mesh(zone.wallGeo, zone.wallMat);
+  zone.wall = new THREE.Mesh(wallGeo, zone.wallMat);
   zone.wall.position.y = 40;
+  zone.wall.scale.set(MAP.size, 1, MAP.size);
   scene.add(zone.wall);
 }
 function updateZone(dt) {
@@ -3749,19 +3961,13 @@ function updateZone(dt) {
     zone.damage = 0.5 + zone.stage * 0.8;
   }
 
-  // update ring visuals
+  // update ring/wall visuals via scale + position — no geometry rebuilds
   const sr = zone.shrinkTime > 0 ? zone.nextRadius : zone.radius;
   const sc = zone.shrinkTime > 0 ? zone.nextCenter : zone.center;
-  zone.ring.geometry.dispose();
-  zone.ring.geometry = (() => {
-    const g = new THREE.RingGeometry(sr-1.5, sr, 64);
-    g.rotateX(-Math.PI/2);
-    return g;
-  })();
   zone.ring.position.set(sc.x, 0.5, sc.z);
-  zone.wall.geometry.dispose();
-  zone.wall.geometry = new THREE.CylinderGeometry(zone.radius, zone.radius, 80, 64, 1, true);
+  zone.ring.scale.set(sr, 1, sr);
   zone.wall.position.set(zone.center.x, 40, zone.center.z);
+  zone.wall.scale.set(zone.radius, 1, zone.radius);
 
   // damage entities outside zone
   entities.forEach(e => {
@@ -3816,17 +4022,29 @@ function updateBullets(dt) {
     if (segLen > 0.001) _sv2.copy(_sv1).divideScalar(segLen);
     let hit = null, hitDist = Infinity, isHead = false;
     if (segLen > 0.001) {
-      for (const e of entities) {
-        if (!e.alive || e === b.owner) continue;
-        for (let bi = 0; bi < 3; bi++) {
-          _sv3.copy(e.pos);
-          _sv3.y += bi === 0 ? 0.5 : bi === 1 ? 1.15 : 1.65;
-          _sv4.subVectors(_sv3, b.mesh.position);
-          const t = Math.max(0, Math.min(segLen, _sv4.dot(_sv2)));
-          _sv5.copy(b.mesh.position).addScaledVector(_sv2, t);
-          if (_sv5.distanceTo(_sv3) < (bi === 2 ? 0.35 : 0.80)) {
-            const d = b.traveled + t;
-            if (d < hitDist) { hit = e; hitDist = d; isHead = bi === 2; }
+      // Spatial-hash query: 3x3 cells around bullet endpoint. Segment is short
+      // (≤ ~5m at 280 m/s × dt) compared to cell size (30m), so this is safe.
+      const _cxE = _cellOf(_sv0.x), _czE = _cellOf(_sv0.z);
+      for (let dcz = -1; dcz <= 1; dcz++) {
+        for (let dcx = -1; dcx <= 1; dcx++) {
+          const bucket = _entGrid.get(_gridKey(_cxE + dcx, _czE + dcz));
+          if (!bucket) continue;
+          for (let bi2 = 0; bi2 < bucket.length; bi2++) {
+            const e = bucket[bi2];
+            // !e.alive guards the case where another bullet killed `e` earlier this frame
+            // (the grid was built before any bullet processing).
+            if (e === b.owner || !e.alive) continue;
+            for (let bi = 0; bi < 3; bi++) {
+              _sv3.copy(e.pos);
+              _sv3.y += bi === 0 ? 0.5 : bi === 1 ? 1.15 : 1.65;
+              _sv4.subVectors(_sv3, b.mesh.position);
+              const t = Math.max(0, Math.min(segLen, _sv4.dot(_sv2)));
+              _sv5.copy(b.mesh.position).addScaledVector(_sv2, t);
+              if (_sv5.distanceTo(_sv3) < (bi === 2 ? 0.35 : 0.80)) {
+                const d = b.traveled + t;
+                if (d < hitDist) { hit = e; hitDist = d; isHead = bi === 2; }
+              }
+            }
           }
         }
       }
@@ -3834,18 +4052,25 @@ function updateBullets(dt) {
     let worldHit = false;
     const terrainH = sampleTerrainHeight(_sv0.x, _sv0.z);
     if (_sv0.y < terrainH + 0.1) worldHit = true;
-    if (!worldHit) for (const bd of buildings) {
-      if (bd.userData.bbox && bd.userData.bbox.containsPoint(_sv0)) {
-        worldHit = true;
-        if (bd.userData.isRangeTarget && b.owner && b.owner.isPlayer) {
-          showHitmarker();
-          const tMesh = bd.userData.targetMesh;
-          if (tMesh && tMesh.userData.tMat) {
-            tMesh.userData.tMat.color.setHex(0xff2020);
-            setTimeout(() => tMesh.userData.tMat.color.setHex(0xf0e8d0), 400);
+    if (!worldHit) {
+      // Bullet endpoint is a point — query just its single cell.
+      const bucket = _bldGrid.get(_gridKey(_cellOf(_sv0.x), _cellOf(_sv0.z)));
+      if (bucket) {
+        for (let ii = 0; ii < bucket.length; ii++) {
+          const bd = _bulletBlds[bucket[ii]];
+          if (bd.userData.bbox && bd.userData.bbox.containsPoint(_sv0)) {
+            worldHit = true;
+            if (bd.userData.isRangeTarget && b.owner && b.owner.isPlayer) {
+              showHitmarker();
+              const tMesh = bd.userData.targetMesh;
+              if (tMesh && tMesh.userData.tMat) {
+                tMesh.userData.tMat.color.setHex(0xff2020);
+                setTimeout(() => tMesh.userData.tMat.color.setHex(0xf0e8d0), 400);
+              }
+            }
+            break;
           }
         }
-        break;
       }
     }
     if (hit) {
@@ -3868,6 +4093,54 @@ function updateBullets(dt) {
 // Pre-built flat typed arrays — populated by _buildCollisionCache() after buildWorld()
 let _colBB = null;  // Float32Array [minX, minZ, maxX, maxZ, ...]
 let _colTR = null;  // Float32Array [x, z, r, ...]
+
+// ----- Spatial hash for bullet broad-phase -----
+// 30m cells: big enough that bullet segments rarely cross more than 1 cell per
+// frame at 280 m/s, small enough that a 1000m map has <1200 cells.
+const _SPATIAL_CELL = 30;
+const _bulletBlds = [];                  // building meshes with bbox (kept in insertion order)
+const _bldGrid    = new Map();           // cellKey -> Int32Array of indices into _bulletBlds
+const _entGrid    = new Map();           // cellKey -> Entity[] (rebuilt every frame)
+// Cell key packs signed (cx, cz) into one number. Map cells from -2047..2047.
+function _gridKey(cx, cz) { return ((cx + 2048) << 12) | (cz + 2048); }
+function _cellOf(x) { return Math.floor(x / _SPATIAL_CELL); }
+
+function _buildBulletSpatialGrid() {
+  _bulletBlds.length = 0;
+  _bldGrid.clear();
+  // Use an intermediate Map<key, number[]> for build, then freeze to Int32Array
+  const tmp = new Map();
+  for (const bd of buildings) {
+    if (!bd.userData.bbox) continue;
+    const idx = _bulletBlds.length;
+    _bulletBlds.push(bd);
+    const bb = bd.userData.bbox;
+    const c0x = _cellOf(bb.min.x), c0z = _cellOf(bb.min.z);
+    const c1x = _cellOf(bb.max.x), c1z = _cellOf(bb.max.z);
+    for (let cz = c0z; cz <= c1z; cz++) {
+      for (let cx = c0x; cx <= c1x; cx++) {
+        const k = _gridKey(cx, cz);
+        let bucket = tmp.get(k);
+        if (!bucket) { bucket = []; tmp.set(k, bucket); }
+        bucket.push(idx);
+      }
+    }
+  }
+  for (const [k, bucket] of tmp) _bldGrid.set(k, Int32Array.from(bucket));
+}
+
+function _rebuildEntitySpatialGrid() {
+  _entGrid.clear();
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i];
+    if (!e.alive) continue;
+    const k = _gridKey(_cellOf(e.pos.x), _cellOf(e.pos.z));
+    let bucket = _entGrid.get(k);
+    if (!bucket) { bucket = []; _entGrid.set(k, bucket); }
+    bucket.push(e);
+  }
+}
+
 function _buildCollisionCache() {
   const solidBlds = buildings.filter(b => b.userData.bbox && !b.userData.ground && !b.userData.losOnly);
   _colBB = new Float32Array(solidBlds.length * 4);
@@ -3884,6 +4157,7 @@ function _buildCollisionCache() {
     _colTR[i*3+1] = trees[i].position.z;
     _colTR[i*3+2] = trees[i].userData.radius || 0.6;
   }
+  _buildBulletSpatialGrid();
 }
 function collidesPos(x, z, r) {
   if (_colBB) {
@@ -4658,6 +4932,28 @@ function buildBat(group) {
   group.userData.adsPos=new THREE.Vector3(0.14,-0.18,-0.24);
 }
 
+// Tiny glowing red dot for reddot/holo sights — rendered with depthTest:false so it always
+// shows through the housing/lens, anchored to the sight wrapper so it tracks the sight.
+function addSightDot(parent, x, y, z) {
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: 0xff2020, transparent: true, opacity: 1.0,
+    depthTest: false, depthWrite: false, fog: false,
+  });
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0018, 10, 8), dotMat);
+  dot.position.set(x, y, z);
+  dot.renderOrder = 998;
+  parent.add(dot);
+  // Soft halo around the dot for the "glow" effect
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xff4030, transparent: true, opacity: 0.35,
+    depthTest: false, depthWrite: false, fog: false,
+  });
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.0036, 10, 8), haloMat);
+  halo.position.set(x, y, z);
+  halo.renderOrder = 997;
+  parent.add(halo);
+}
+
 function buildViewmodel() {
   if (viewmodel) {
     camera.remove(viewmodel);
@@ -4858,7 +5154,11 @@ function buildViewmodel() {
       const tubeR = Math.min(sz1.x, sz1.y) / 2;
       wrapper.position.set(_wso.x, mountY + tubeR + 0.012 + _wso.y, mountZ + (_wso.z || 0));
       viewmodel.add(wrapper);
-      if (a.scope === 'reddot' || a.scope === 'holo') viewmodel.userData.reddotHousing = wrapper;
+      if (a.scope === 'reddot' || a.scope === 'holo') {
+        viewmodel.userData.reddotHousing = wrapper;
+        // Small glowing red dot at the sight's lens center — visible from camera through depthTest:false
+        addSightDot(wrapper, 0, 0, 0);
+      }
     } else if (a.scope === 'reddot' || a.scope === 'holo') {
       // Fallback: EOTech-style box sight
       const _fbScale = ((_weaponScopeSizes[player.weapon] || {})[a.scope]) ? ((_weaponScopeSizes[player.weapon])[a.scope] / 0.07) : 1;
@@ -4876,6 +5176,8 @@ function buildViewmodel() {
       housingGroup.scale.setScalar(_fbScale);
       viewmodel.add(housingGroup);
       viewmodel.userData.reddotHousing = housingGroup;
+      // Glowing red dot at the lens centre of the fallback procedural sight
+      addSightDot(housingGroup, 0, rdMid, mountZ);
     } else {
       // Fallback: procedural telescopic scope
       const sLen = a.scope === 'scope8x' ? 0.20 : (a.scope === 'scope4x' ? 0.16 : 0.12);
@@ -4994,10 +5296,10 @@ function updateViewmodel(dt) {
   viewmodel.visible = (settings.view === 'fp') && !lookingThroughScope;
   if (!viewmodel.visible) return;
 
-  // Red-dot: hide housing when ADS so just the lens is visible (cleaner look)
-  const adsThroughReddot = player.isAds && stats && (stats.scope === 'reddot' || stats.scope === 'holo');
+  // Red-dot / holo: keep the FULL 3D sight visible at all times. Player looks through
+  // the actual sight model (no HTML overlay) when ADSing.
   if (viewmodel.userData.reddotHousing) {
-    viewmodel.userData.reddotHousing.visible = !adsThroughReddot;
+    viewmodel.userData.reddotHousing.visible = true;
   }
 
   // Shoulder switch (mirror across x — flip both position and the gun model)
@@ -5133,8 +5435,15 @@ function updateViewmodel(dt) {
 function updatePlayer(dt) {
   if (!player.alive) return;
 
-  // mouse look
-  const sens = player.isAds ? 0.0014 : 0.0028;
+  // mouse look — ADS sensitivity scales with zoom so cm/360° stays consistent.
+  // Uses 1/sqrt(zoom) (a.k.a. "monitor distance match coefficient ≈ 0") which
+  // keeps high-zoom scopes usable for tracking without feeling glacial.
+  let sens = 0.0028;
+  if (player.isAds && player.weapon) {
+    const _stats = player.effectiveStats();
+    const _zoom = _stats ? _stats.adsZoom : 1;
+    sens = 0.0028 / Math.sqrt(Math.max(1, _zoom));
+  }
   player.yaw -= mouse.dx * sens;
   player.pitch -= mouse.dy * sens;
   player.pitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, player.pitch));
@@ -5321,8 +5630,9 @@ function updatePlayer(dt) {
       r2.setAttribute('display','none');
     }
   } else if ((scopeType === 'reddot' || scopeType === 'holo') && player.isAds) {
+    // Player is looking through the actual 3D sight model — no HTML overlay needed.
     scopeEl.classList.remove('on');
-    reddotEl.classList.add('on');
+    reddotEl.classList.remove('on');
     showCrosshair = false;
   } else {
     scopeEl.classList.remove('on');
@@ -5387,7 +5697,8 @@ function updateBots(dt) {
   const now = performance.now()/1000;
   if (!updateBots._frame) updateBots._frame = 0;
   updateBots._frame++;
-  for (const b of entities) {
+  for (let _bIdx = 0; _bIdx < entities.length; _bIdx++) {
+    const b = entities[_bIdx];
     if (b.isPlayer || !b.alive) continue;
 
     // Distance-based AI throttle — saves ~60% CPU on far bots
@@ -5403,15 +5714,18 @@ function updateBots(dt) {
     if (b.mesh) b.mesh.visible = true;
 
     // 80–200m: run full AI only every 4th frame staggered by entity index
-    const _bIdx = entities.indexOf(b);
     if (_tbDist2 > 6400 && (updateBots._frame + _bIdx) % 4 !== 0) {
       // Still sync mesh so position doesn't freeze
       if (b.mesh) { b.mesh.position.set(b.pos.x, b.pos.y, b.pos.z); b.mesh.rotation.y = b.yaw; }
       continue;
     }
-    // pick target = nearest enemy in sight
-    // Sight range: 60 normal, 120 when already engaged
-    const sight = b.aiState === 'engage' ? 120 : 60;
+    // pick target = nearest enemy in sight.
+    // Sight range scales with the bot's weapon range so snipers can actually
+    // engage at sniper distance and shotguns stay close-quarters.
+    // Engaged state bumps sight 50% (target already located).
+    const _wpn = b.weapon && WEAPONS[b.weapon];
+    const _baseSight = _wpn ? Math.min(_wpn.range * 0.55, 220) : 60;
+    const sight = b.aiState === 'engage' ? Math.min(_baseSight * 1.5, 260) : _baseSight;
     let target = null, td = Infinity;
     const losReady = !b._losNextCheck || now >= b._losNextCheck;
     if (losReady) {
@@ -5432,9 +5746,11 @@ function updateBots(dt) {
     }
 
     if (target) {
+      const wasEngaged = b.aiState === 'engage';
       b.aiState = 'engage';
-      if (!b.lastSeen) b.lastSeen = new THREE.Vector3(); b.lastSeen.copy(target.pos);
-      if (b.alertTimer <= 0) b.alertTimer = b.reactionTime + 0.1; // brief wind-up on first spot
+      if (!b.lastSeen) b.lastSeen = new THREE.Vector3();
+      b.lastSeen.copy(target.pos);
+      if (!wasEngaged) b.alertTimer = b.reactionTime + 0.1; // wind-up on fresh sighting
       b.alertTimer -= dt;
 
       // face target
@@ -5480,9 +5796,16 @@ function updateBots(dt) {
       if (b.ammo[b.weapon] === 0 && b.reserve[b.weapon] > 0) b.reload();
     } else {
       // No target visible
-      b.alertTimer = 0; // reset so next sighting triggers reaction delay fresh
-      if (b.alertTimer > 0 && b.lastSeen) {
-        // investigate
+      if (b.aiState === 'engage') {
+        // Just lost contact — drop into investigate mode for a few seconds
+        b.aiState = 'investigate';
+        b.investigateTimer = 6;
+        b.alertTimer = 0; // clear wind-up so re-sighting triggers fresh reaction
+      }
+      if (b.aiState === 'investigate') b.investigateTimer -= dt;
+
+      if (b.aiState === 'investigate' && b.investigateTimer > 0 && b.lastSeen) {
+        // investigate — walk toward last known position, then sweep view
         const dx = b.lastSeen.x - b.pos.x;
         const dz = b.lastSeen.z - b.pos.z;
         const d = Math.sqrt(dx*dx + dz*dz);
@@ -5491,6 +5814,9 @@ function updateBots(dt) {
           const _bNpI = _sv1.copy(b.pos).addScaledVector(_sv2.set(dx,0,dz).normalize(), 4*dt);
           if (!collidesPos(_bNpI.x, b.pos.z, 0.5)) b.pos.x = _bNpI.x;
           if (!collidesPos(b.pos.x, _bNpI.z, 0.5)) b.pos.z = _bNpI.z;
+        } else {
+          // arrived — sweep gaze searching for target
+          b.yaw += dt * Math.sin(now * 0.9 + b.pos.x * 0.3) * 1.1;
         }
       } else {
         b.aiState = 'patrol';
@@ -5576,47 +5902,7 @@ function updateBots(dt) {
   }
 }
 
-// Raw procedural noise height (no city flattening) — shared formula
-// Value noise + FBM for realistic terrain
-function _vnoise(ix, iz) {
-  // Hash two integers to [0,1]
-  const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453;
-  return n - Math.floor(n);
-}
-function _smoothNoise(x, z) {
-  const ix = Math.floor(x), iz = Math.floor(z);
-  const fx = x - ix, fz = z - iz;
-  // Quintic smoothstep
-  const ux = fx*fx*fx*(fx*(fx*6-15)+10);
-  const uz = fz*fz*fz*(fz*(fz*6-15)+10);
-  return _vnoise(ix,iz)*(1-ux)*(1-uz)
-       + _vnoise(ix+1,iz)*ux*(1-uz)
-       + _vnoise(ix,iz+1)*(1-ux)*uz
-       + _vnoise(ix+1,iz+1)*ux*uz;
-}
-function _fbm(x, z, octaves) {
-  let v=0, amp=1, freq=1, max=0;
-  for (let o=0; o<octaves; o++) {
-    v   += (_smoothNoise(x*freq, z*freq)*2-1) * amp;
-    max += amp;
-    amp  *= 0.50;
-    freq *= 2.10;
-  }
-  return v / max;
-}
-function rawTerrainNoise(x, z) {
-  // Large-scale rolling hills — more dramatic amplitude
-  const large = _fbm(x*0.0055, z*0.0055, 5) * 14.0;
-  // Medium ridges and valleys
-  const mid   = _fbm(x*0.018  + 4.3, z*0.016  + 1.7, 4) * 4.5;
-  // Fine surface detail
-  const fine  = _fbm(x*0.060  + 8.1, z*0.058  + 3.2, 3) * 1.0;
-  // Domain-warped ridge lines — stronger warp for more interesting terrain
-  const warpX = _fbm(x*0.010  + 2.0, z*0.010  + 5.0, 3) * 18;
-  const warpZ = _fbm(x*0.010  + 7.0, z*0.010  + 1.0, 3) * 18;
-  const warped= _fbm((x+warpX)*0.012, (z+warpZ)*0.012, 4) * 7.0;
-  return large + mid * 0.6 + fine + warped * 0.5;
-}
+// Noise/terrain math lives in ./math-utils.js — imported at top of file.
 
 // Sample the world terrain height at (x, z)
 // Mirrors exactly the vertex displacement used in buildWorld's ground mesh.
@@ -5624,10 +5910,11 @@ function sampleTerrainHeight(x, z) {
   // Shooting range — perfectly flat floor at y=0
   if (globalThis._rangeMode) return 0;
   // ─── Bilinear interpolation matching the actual rendered terrain mesh ───
-  // The mesh is PlaneGeometry(MAP.size*2.4, MAP.size*2.4, SEGS=80), so cell width = MAP.size*0.03.
-  // Without this, the player gets placed at raw noise heights (which contain high-frequency
-  // detail the mesh's coarse vertex grid can't resolve), causing clipping above/below the visible ground.
-  const CELL = MAP.size * 0.03;
+  // Mesh is PlaneGeometry(MAP.size*2.4, MAP.size*2.4, TERRAIN_SEGS), so cell
+  // width = MAP.size * 2.4 / TERRAIN_SEGS. Without this, the player gets placed
+  // at raw noise heights (high-frequency detail the mesh's coarse vertex grid
+  // can't resolve), causing clipping above/below the visible ground.
+  const CELL = (MAP.size * 2.4) / TERRAIN_SEGS;
   const gx0 = Math.floor(x / CELL) * CELL;
   const gz0 = Math.floor(z / CELL) * CELL;
   const fu = (x - gx0) / CELL;
@@ -5667,12 +5954,7 @@ function sampleTerrainHeight(x, z) {
   return h;
 }
 
-function lerpAngle(a, b, t) {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI*2;
-  while (d < -Math.PI) d += Math.PI*2;
-  return a + d * Math.min(1, t);
-}
+// lerpAngle lives in ./math-utils.js — imported at top of file.
 
 function hasLineOfSight(a, b) {
   // simple raycast against buildings
@@ -6133,6 +6415,21 @@ function flashDamage() {
   const d = document.getElementById('damage');
   d.style.opacity = 1;
   setTimeout(() => d.style.opacity = 0, 250);
+}
+function showDamageDirection(source) {
+  if (!player || !source || !source.pos) return;
+  const dx = source.pos.x - player.pos.x;
+  const dz = source.pos.z - player.pos.z;
+  if (dx === 0 && dz === 0) return;
+  const sourceYaw = Math.atan2(dx, dz);
+  const rel = sourceYaw - player.yaw;
+  const host = document.getElementById('dmgDir');
+  if (!host) return;
+  const arrow = document.createElement('div');
+  arrow.className = 'dmg-arrow';
+  arrow.style.transform = `rotate(${rel}rad)`;
+  host.appendChild(arrow);
+  setTimeout(() => { if (arrow.parentNode) arrow.parentNode.removeChild(arrow); }, 1350);
 }
 let _hitmarkerTimer = null;
 function showHitmarker() {
@@ -6600,6 +6897,11 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
   if (gameOver) { composer.render(); return; }
+  gameTime += dt;
+  // Tick reload completion for everyone (cheap, runs even on far/throttled bots)
+  for (let i = 0; i < entities.length; i++) {
+    if (entities[i].alive) entities[i].tickReload();
+  }
   updatePlayer(dt);
   updateViewmodel(dt);
   updateBots(dt);
@@ -6634,6 +6936,7 @@ function animate() {
     const rng = it.mesh.userData.ring;
     if (rng) rng.material.opacity = 0.35 + Math.sin(_lt * 2.5 + it.pos.z) * 0.20;
   }
+  _rebuildEntitySpatialGrid();
   updateBullets(dt);
   updateZone(dt);
   // Minimap throttled to ~20fps — eye can't tell the difference

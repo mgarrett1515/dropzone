@@ -406,3 +406,41 @@ canvas { display:block; }
 
 .pointer-locked #menu { display:none !important; }
 .pointer-locked #clickHint { display:none !important; }
+
+/* ── Directional damage indicator ──────────────────────────────────── */
+#dmgDir {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 12;
+}
+.dmg-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  animation: dmg-arrow-fade 1.3s ease-out forwards;
+  transform-origin: center;
+}
+.dmg-arrow::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: -170px;
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-bottom: 26px solid rgba(255, 40, 40, 0.9);
+  filter: drop-shadow(0 0 10px rgba(255, 40, 40, 0.85));
+}
+@keyframes dmg-arrow-fade {
+  0%   { opacity: 1; }
+  60%  { opacity: 0.85; }
+  100% { opacity: 0; }
+}
