@@ -1,0 +1,10 @@
+# Auto-generated for Cottage_FREE
+newmtl Cottage_FREE
+Ka 1.000 1.000 1.000
+Kd 1.000 1.000 1.000
+Ks 0.000 0.000 0.000
+Ns 10
+d 1
+illum 2
+map_Kd Cottage_FREE_BaseColor.png
+map_Bump Cottage_FREE_Normal.png

@@ -7,9 +7,12 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { WEAPONS, ATTACHMENTS, HEAL_ITEMS } from './weapons.js';
 import { rawTerrainNoise, lerpAngle, fbm } from './math-utils.js';
+import { generateNeighborhood, placeBuilding } from './buildings.js';
 
 // Minimal in-house geometry merger that only handles the cases we actually need:
 // indexed geometries (Box/Cylinder/Circle) with identical attribute sets.
@@ -351,6 +354,193 @@ function preloadComp()       { if (_compLoadPromise)        return _compLoadProm
 function preloadSilencerMdl(){ if (_silencerModelLoadPromise) return _silencerModelLoadPromise; const l=new GLTFLoader(); _silencerModelLoadPromise = new Promise((r,j)=>l.load('/sights/makarov_pistol_silencer.glb', g=>r(g.scene),null,j)).then(s=>{SILENCER_MODEL=s;}); return _silencerModelLoadPromise; }
 preloadKar98(); preloadUmp45(); preloadBeretta(); preloadIzh27(); preloadSpas12(); preloadBarrett(); preloadP90(); preloadDeagle(); preloadKnife(); preloadBat(); preloadCrowbar(); preloadLowPolyCar(); preloadToyota(); preloadRacecar(); preloadFreeLowPoly(); preloadVan(); preloadMuscleCar(); preloadAmmoBox(); preloadMedkit(); preloadBandage(); preloadArmorVest(); preloadReddotSight(); preloadScope2x(); preloadAcog(); preloadScope8x(); preloadHolo(); preloadExtmag(); preloadGrip(); preloadComp(); preloadSilencerMdl();
 
+// ─── Imported OBJ model pools ──────────────────────────────────────────────
+// Each loaded model is stored in one of these maps, keyed by base name.
+// Caller fetches an entry, clones the THREE.Group, and adds it to the scene.
+export const IMPORTED_HOUSE_MODELS = {};   // city/residential houses
+export const IMPORTED_RURAL_MODELS = {};   // barns, silos, windmill, etc.
+export const IMPORTED_CAR_MODELS   = {};   // SUV, Taxi, Cop, etc.
+export const IMPORTED_CITY_MODELS  = {};   // GLB downtown buildings (6 city blocks)
+export const IMPORTED_RESIDENTIAL_MODELS = {};  // GLB residential houses (japo, etc.)
+
+// Residential OBJ house models removed — pool is empty pending new asset
+// pack. The non-farm POIs currently spawn no buildings as a result; only
+// trees and cars appear there until new house models are wired in.
+const IMPORTED_HOUSE_NAMES = [];
+// Curated rural set used by the farm POI and the village mix.
+const RURAL_GROUPS = {
+  big:   ['Barn', 'BigBarn', 'SmallBarn', 'OpenBarn', 'Silo_House', 'TowerWindmill'],
+  small: ['ChickenCoop', 'Silo', 'WaterTower', 'Well', 'Windmill'],
+};
+const IMPORTED_RURAL_NAMES = [
+  // Bigger structures suitable as buildings on a lot
+  'Barn', 'BigBarn', 'SmallBarn', 'OpenBarn', 'Silo_House', 'TowerWindmill',
+  // Smaller/decorative — placed sparingly
+  'ChickenCoop', 'Silo', 'WaterTower', 'Well', 'Windmill',
+];
+const IMPORTED_CAR_NAMES = [
+  'Cop', 'NormalCar1', 'NormalCar2', 'SUV', 'SportsCar', 'SportsCar2', 'Taxi',
+];
+
+// Load one OBJ+MTL pair into `pool[name]`. The MTL is loaded first so the
+// OBJLoader can resolve material references; both files are expected to live
+// in `basePath/`. We don't fail the whole preload chain on one missing file —
+// just skip it.
+// Universal post-load material tweaks for imported OBJ models. Called both
+// on the MTLLoader's materials dict AND on each mesh's resolved material
+// after OBJ load, because MTLLoader sometimes recreates materials on the
+// mesh in a way that drops earlier-applied settings.
+function _fixImportedMaterial(m) {
+  if (!m) return;
+  m.transparent = false;
+  m.alphaTest = 0;
+  m.opacity = 1;
+  m.depthWrite = true;
+  m.side = THREE.DoubleSide;
+  if (m.map) {
+    m.map.minFilter = THREE.NearestFilter;
+    m.map.magFilter = THREE.NearestFilter;
+    m.map.generateMipmaps = false;
+    m.map.colorSpace = THREE.SRGBColorSpace;
+    m.map.needsUpdate = true;
+  }
+}
+
+function _loadObjWithMtl(name, basePath, pool) {
+  return new Promise((resolve) => {
+    const mtlLoader = new MTLLoader();
+    mtlLoader.setPath(basePath);
+    mtlLoader.setResourcePath(basePath); // textures live next to the MTL
+    mtlLoader.load(`${name}.mtl`, (materials) => {
+      materials.preload();
+      // Fix all materials BEFORE OBJLoader picks them up
+      const mats = materials.materials;
+      for (const k of Object.keys(mats)) _fixImportedMaterial(mats[k]);
+      const objLoader = new OBJLoader();
+      objLoader.setMaterials(materials);
+      objLoader.setPath(basePath);
+      objLoader.load(`${name}.obj`, (obj) => {
+        // Belt-and-suspenders: also fix every mesh material after OBJ resolves them
+        obj.traverse(c => {
+          if (!c.isMesh || !c.material) return;
+          const arr = Array.isArray(c.material) ? c.material : [c.material];
+          for (const m of arr) _fixImportedMaterial(m);
+        });
+        pool[name] = obj;
+        resolve();
+      }, undefined, () => { console.warn('OBJ failed:', name); resolve(); });
+    }, undefined, () => {
+      // No MTL — load OBJ alone with a default Lambert
+      const objLoader = new OBJLoader();
+      objLoader.setPath(basePath);
+      objLoader.load(`${name}.obj`, (obj) => { pool[name] = obj; resolve(); },
+        undefined, () => { console.warn('OBJ (no MTL) failed:', name); resolve(); });
+    });
+  });
+}
+
+function preloadImportedHouses() {
+  return Promise.resolve();  // no residential house OBJs currently in the project
+}
+function preloadImportedRural() {
+  return Promise.all(IMPORTED_RURAL_NAMES.map(n => _loadObjWithMtl(n, '/imported_rural/', IMPORTED_RURAL_MODELS)));
+}
+function preloadImportedCars() {
+  return Promise.all(IMPORTED_CAR_NAMES.map(n => _loadObjWithMtl(n, '/imported_cars/', IMPORTED_CAR_MODELS)));
+}
+
+// GLB downtown buildings — 6 hand-picked models for the central city.
+const IMPORTED_CITY_NAMES = [
+  'city_building', 'city_downtown', 'old_city_building',
+  'old_city_building_2', 'city_ready', 'city_ready_alt',
+];
+function _loadGlb(name, basePath, pool) {
+  return new Promise((resolve) => {
+    const loader = new GLTFLoader();
+    loader.load(`${basePath}${name}.glb`, (g) => {
+      pool[name] = g.scene;
+      resolve();
+    }, undefined, () => { console.warn('GLB failed:', name); resolve(); });
+  });
+}
+function preloadImportedCity() {
+  return Promise.all(IMPORTED_CITY_NAMES.map(n => _loadGlb(n, '/city_glbs/', IMPORTED_CITY_MODELS)));
+}
+
+// Residential houses (GLB + OBJ mix). Each entry: { name, kind, dir? }.
+// GLB models sit directly under /imported_residential/. OBJ models live in
+// their own subfolder so co-located MTL + texture files don't collide.
+const IMPORTED_RESIDENTIAL_SPECS = [
+  { name: 'casa_japo',    kind: 'glb' },
+  { name: 'Forge',        kind: 'glb' },
+  { name: 'objHouyse',    kind: 'obj', dir: 'obj_house' },
+  { name: 'SingleHouse',  kind: 'obj', dir: 'single_house' },
+  { name: 'Cottage_FREE', kind: 'obj', dir: 'cottage' },
+  { name: 'Wood_house',   kind: 'obj', dir: 'wood_house' },  // no MTL, default material
+];
+const IMPORTED_RESIDENTIAL_NAMES = IMPORTED_RESIDENTIAL_SPECS.map(s => s.name);
+function preloadImportedResidential() {
+  return Promise.all(IMPORTED_RESIDENTIAL_SPECS.map(s => {
+    if (s.kind === 'glb') return _loadGlb(s.name, '/imported_residential/', IMPORTED_RESIDENTIAL_MODELS);
+    return _loadObjWithMtl(s.name, `/imported_residential/${s.dir}/`, IMPORTED_RESIDENTIAL_MODELS);
+  }));
+}
+
+preloadImportedHouses(); preloadImportedRural(); preloadImportedCars(); preloadImportedCity(); preloadImportedResidential();
+
+// Module-level helper that places an imported OBJ-loaded building in the
+// world. Used by both the POI layout in buildWorld() and by the central-city
+// generator (makeCityBuilding). Returns the placed wrapper Group.
+function _spawnImportedBuilding(model, x, z, rotY, targetMaxXZ) {
+  if (!model) return null;
+  const clone = model.clone(true);
+  // Don't clone materials — `_fixImportedMaterial` already ran on the loaded
+  // template, and sharing materials across instances lets the GPU batch them.
+  clone.traverse(c => {
+    if (c.isMesh) {
+      c.castShadow = false;
+      c.receiveShadow = true;
+      c.frustumCulled = true;
+    }
+  });
+  clone.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(clone);
+  const size = new THREE.Vector3(); bbox.getSize(size);
+  const center = new THREE.Vector3(); bbox.getCenter(center);
+  const maxXZ = Math.max(size.x, size.z);
+  if (!(maxXZ > 0)) return null;
+  const scale = targetMaxXZ / maxXZ;
+  const wrapper = new THREE.Group();
+  clone.scale.setScalar(scale);
+  clone.position.x = -center.x * scale;
+  clone.position.z = -center.z * scale;
+  clone.position.y = -bbox.min.y * scale;
+  wrapper.add(clone);
+  const groundY = sampleTerrainHeight(x, z);
+  wrapper.position.set(x, groundY, z);
+  wrapper.rotation.y = rotY || 0;
+  scene.add(wrapper);
+  // World-space wall sentinels (4 walls — imported buildings don't have door cutouts)
+  const scaledW = size.x * scale, scaledD = size.z * scale, scaledH = size.y * scale;
+  const cosR = Math.cos(rotY || 0), sinR = Math.sin(rotY || 0);
+  const WT = 0.35;
+  function _ws(lcx, lcz, lW, lD) {
+    const wx = x + lcx*cosR - lcz*sinR;
+    const wz = z + lcx*sinR + lcz*cosR;
+    const hw = Math.abs(lW * 0.5 * cosR) + Math.abs(lD * 0.5 * sinR);
+    const hd = Math.abs(lW * 0.5 * sinR) + Math.abs(lD * 0.5 * cosR);
+    buildings.push({ userData: { bbox: new THREE.Box3(
+      new THREE.Vector3(wx - hw - 0.05, groundY - 0.3, wz - hd - 0.05),
+      new THREE.Vector3(wx + hw + 0.05, groundY + scaledH + 0.4, wz + hd + 0.05)
+    ), losOnly: true }});
+  }
+  _ws(-scaledW/2, 0, WT * 2, scaledD + WT);
+  _ws( scaledW/2, 0, WT * 2, scaledD + WT);
+  _ws(0, -scaledD/2, scaledW + WT, WT * 2);
+  _ws(0,  scaledD/2, scaledW + WT, WT * 2);
+  return wrapper;
+}
+
 document.getElementById('playBtn').addEventListener('click', () => _launchWithErrorCatch(startGame));
 document.getElementById('rangeBtn').addEventListener('click', () => _launchWithErrorCatch(startRange));
 
@@ -539,6 +729,10 @@ async function startGame() {
     ['SUPPLIES',      preloadMedkit],
     ['SUPPLIES',      preloadBandage],
     ['ARMOR VEST',    preloadArmorVest],
+    ['RURAL',         preloadImportedRural],
+    ['CARS',          preloadImportedCars],
+    ['CITY',          preloadImportedCity],
+    ['RESIDENTIAL',   preloadImportedResidential],
     ['SIGHTS',        preloadReddotSight],
     ['SIGHTS',        preloadScope2x],
     ['SIGHTS',        preloadAcog],
@@ -864,6 +1058,10 @@ async function startRange() {
     ['SUPPLIES',     preloadMedkit],
     ['SUPPLIES',     preloadBandage],
     ['ARMOR VEST',   preloadArmorVest],
+    ['RURAL',        preloadImportedRural],
+    ['CARS',         preloadImportedCars],
+    ['CITY',         preloadImportedCity],
+    ['RESIDENTIAL',  preloadImportedResidential],
     ['SIGHTS',       preloadReddotSight],
     ['SIGHTS',       preloadScope2x],
     ['SIGHTS',       preloadAcog],
@@ -1110,117 +1308,241 @@ function makeRoadSegment(p1, p2) {
   }
 }
 
-// Procedural ground-detail texture, cached after first generation.
-// Output is brightness-leaning (values near 1.0, with darker grass-blade strokes
-// and small specks). Designed to be multiplied by vertex colors — preserves hue
-// from the biome palette while adding sub-meter detail that breaks up the
-// "smooth blob" look of pure vertex coloring.
-let _groundDetailTexture = null;
-function _buildGroundDetailTexture() {
-  if (_groundDetailTexture) return _groundDetailTexture;
+// Procedural ground textures, cached after first generation. We produce:
+//   * a COLOR texture (broken up by macro patches, denser & more varied blades)
+//   * a NORMAL map (procedurally derived from a height field of the same pattern)
+//   * a MACRO overlay (very low frequency) that breaks tile repetition at distance
+// The color texture stays brightness-leaning (~0.75–1.0) so multiplying by the
+// per-vertex biome color preserves hue.
+let _groundColorTexture  = null;
+let _groundNormalTexture = null;
+let _groundMacroTexture  = null;
+
+function _wrappedDraw(ctx, SIZE, drawFn) {
+  // Re-draw the same primitives shifted by ±SIZE on x/y so anything crossing
+  // an edge appears on the opposite edge — makes the tile seamless.
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      ctx.save();
+      ctx.translate(ox * SIZE, oy * SIZE);
+      drawFn();
+      ctx.restore();
+    }
+  }
+}
+
+function _buildGroundTextures() {
+  if (_groundColorTexture && _groundNormalTexture && _groundMacroTexture) {
+    return [_groundColorTexture, _groundNormalTexture, _groundMacroTexture];
+  }
   const SIZE = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
-  const ctx = canvas.getContext('2d');
 
-  // Base: bright noise floor so multiplied result keeps vertex hue.
-  const img = ctx.createImageData(SIZE, SIZE);
-  const data = img.data;
-  for (let i = 0; i < SIZE * SIZE; i++) {
-    const n = 0.82 + Math.random() * 0.18;          // 0.82..1.0
-    const g = (n + (Math.random() - 0.5) * 0.04);   // tiny per-channel jitter
-    const r = (n + (Math.random() - 0.5) * 0.04);
-    const b = (n + (Math.random() - 0.5) * 0.04);
-    data[i*4]     = Math.max(0, Math.min(255, Math.floor(r * 255)));
-    data[i*4 + 1] = Math.max(0, Math.min(255, Math.floor(g * 255)));
-    data[i*4 + 2] = Math.max(0, Math.min(255, Math.floor(b * 255)));
-    data[i*4 + 3] = 255;
+  // We render to TWO canvases simultaneously:
+  //  - colorC : the visible RGB texture (brightness-modulated grass detail)
+  //  - heightC: a grayscale height field used to derive the normal map
+  const colorCanvas  = document.createElement('canvas');
+  const heightCanvas = document.createElement('canvas');
+  colorCanvas.width  = colorCanvas.height  = SIZE;
+  heightCanvas.width = heightCanvas.height = SIZE;
+  const cctx = colorCanvas.getContext('2d');
+  const hctx = heightCanvas.getContext('2d');
+
+  // ─── Base noise: bright neutral floor, slight green/yellow tint variance ───
+  const cimg = cctx.createImageData(SIZE, SIZE);
+  const cdata = cimg.data;
+  const himg = hctx.createImageData(SIZE, SIZE);
+  const hdata = himg.data;
+  for (let py = 0; py < SIZE; py++) {
+    for (let px = 0; px < SIZE; px++) {
+      const idx = (py * SIZE + px) * 4;
+      // Very-low-freq tilt that gives gentle warm/cool patches across the tile
+      const patch = Math.sin(px * 0.018) * Math.cos(py * 0.021);
+      const warmth = 0.5 + patch * 0.18 + (Math.random() - 0.5) * 0.06;
+      const n = 0.78 + Math.random() * 0.20; // 0.78..0.98 brightness
+      // Slight warm/cool channel bias from `warmth`
+      const r = n + (warmth - 0.5) * 0.05 + (Math.random() - 0.5) * 0.04;
+      const g = n + 0.02                  + (Math.random() - 0.5) * 0.04;
+      const b = n - (warmth - 0.5) * 0.04 + (Math.random() - 0.5) * 0.04;
+      cdata[idx]   = Math.max(0, Math.min(255, Math.floor(r * 255)));
+      cdata[idx+1] = Math.max(0, Math.min(255, Math.floor(g * 255)));
+      cdata[idx+2] = Math.max(0, Math.min(255, Math.floor(b * 255)));
+      cdata[idx+3] = 255;
+      const h0 = 128 + Math.floor((Math.random() - 0.5) * 24);
+      hdata[idx] = hdata[idx+1] = hdata[idx+2] = h0;
+      hdata[idx+3] = 255;
+    }
   }
-  ctx.putImageData(img, 0, 0);
+  cctx.putImageData(cimg, 0, 0);
+  hctx.putImageData(himg, 0, 0);
 
-  // Draw with edge-wrap so the tile is seamless: each stroke is also drawn
-  // shifted by ±SIZE on x/y so anything crossing an edge appears on the other.
-  function _wrappedStroke(drawFn) {
-    for (let oy = -1; oy <= 1; oy++) {
-      for (let ox = -1; ox <= 1; ox++) {
-        ctx.save();
-        ctx.translate(ox * SIZE, oy * SIZE);
-        drawFn();
-        ctx.restore();
+  // ─── Macro patches: large soft colored blobs ───
+  _wrappedDraw(cctx, SIZE, () => {
+    for (let i = 0; i < 30; i++) {
+      const x = Math.random() * SIZE;
+      const y = Math.random() * SIZE;
+      const r = 30 + Math.random() * 80;
+      const grad = cctx.createRadialGradient(x, y, 0, x, y, r);
+      const drier = Math.random() < 0.5;
+      if (drier) {
+        grad.addColorStop(0, `rgba(150, 130, 70, ${0.18 + Math.random() * 0.18})`);
+        grad.addColorStop(1, 'rgba(150, 130, 70, 0)');
+      } else {
+        grad.addColorStop(0, `rgba(40, 60, 25, ${0.18 + Math.random() * 0.16})`);
+        grad.addColorStop(1, 'rgba(40, 60, 25, 0)');
       }
+      cctx.fillStyle = grad;
+      cctx.fillRect(x - r, y - r, r * 2, r * 2);
     }
+  });
+
+  // ─── Grass-blade hatching: 5 colored passes ───
+  cctx.lineWidth = 1;
+  const bladePasses = [
+    { count: 5500, color: 'rgba(28, 48, 18, %A)',   alpha: [0.18, 0.20], len: [2.5, 5.5], height: -28 },
+    { count: 3500, color: 'rgba(55, 80, 30, %A)',   alpha: [0.20, 0.22], len: [2.0, 4.5], height: -16 },
+    { count: 2200, color: 'rgba(105, 120, 50, %A)', alpha: [0.16, 0.20], len: [2.0, 4.0], height:  +8 },
+    { count: 1400, color: 'rgba(150, 130, 70, %A)', alpha: [0.14, 0.18], len: [1.8, 3.5], height:  +4 },
+    { count:  900, color: 'rgba(240, 240, 200, %A)',alpha: [0.10, 0.14], len: [1.5, 3.0], height: +40 },
+  ];
+  for (const pass of bladePasses) {
+    _wrappedDraw(cctx, SIZE, () => {
+      for (let i = 0; i < pass.count; i++) {
+        const x = Math.random() * SIZE;
+        const y = Math.random() * SIZE;
+        const len  = pass.len[0]   + Math.random() * (pass.len[1]   - pass.len[0]);
+        const lean = (Math.random() - 0.5) * 1.8;
+        const a    = pass.alpha[0] + Math.random() * (pass.alpha[1] - pass.alpha[0]);
+        cctx.strokeStyle = pass.color.replace('%A', a.toFixed(3));
+        cctx.beginPath();
+        cctx.moveTo(x, y);
+        cctx.lineTo(x + lean, y - len);
+        cctx.stroke();
+      }
+    });
+    _wrappedDraw(hctx, SIZE, () => {
+      const heightVal = Math.max(0, Math.min(255, 128 + pass.height));
+      hctx.strokeStyle = `rgba(${heightVal}, ${heightVal}, ${heightVal}, 0.25)`;
+      hctx.lineWidth = 1;
+      for (let i = 0; i < pass.count; i++) {
+        const x = Math.random() * SIZE;
+        const y = Math.random() * SIZE;
+        const len  = pass.len[0] + Math.random() * (pass.len[1] - pass.len[0]);
+        const lean = (Math.random() - 0.5) * 1.8;
+        hctx.beginPath();
+        hctx.moveTo(x, y);
+        hctx.lineTo(x + lean, y - len);
+        hctx.stroke();
+      }
+    });
   }
 
-  // Grass-blade hatching: short, near-vertical dark strokes.
-  ctx.lineWidth = 1;
-  _wrappedStroke(() => {
-    for (let i = 0; i < 4500; i++) {
-      const x = Math.random() * SIZE;
-      const y = Math.random() * SIZE;
-      const len = 2.5 + Math.random() * 4.5;
-      const lean = (Math.random() - 0.5) * 1.8;
-      ctx.strokeStyle = `rgba(40, 55, 25, ${0.15 + Math.random() * 0.18})`;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + lean, y - len);
-      ctx.stroke();
-    }
-  });
-
-  // Lighter blade highlights — caught light on blade edges.
-  _wrappedStroke(() => {
-    for (let i = 0; i < 1400; i++) {
-      const x = Math.random() * SIZE;
-      const y = Math.random() * SIZE;
-      const len = 1.8 + Math.random() * 3.0;
-      const lean = (Math.random() - 0.5) * 1.5;
-      ctx.strokeStyle = `rgba(245, 245, 210, ${0.10 + Math.random() * 0.10})`;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + lean, y - len);
-      ctx.stroke();
-    }
-  });
-
-  // Small dark specks — pebbles, dirt clumps.
-  _wrappedStroke(() => {
-    for (let i = 0; i < 2200; i++) {
+  // ─── Dark specks (pebbles) + mid-tone soil speckle ───
+  _wrappedDraw(cctx, SIZE, () => {
+    for (let i = 0; i < 2400; i++) {
       const x = Math.random() * SIZE;
       const y = Math.random() * SIZE;
       const r = 0.5 + Math.random() * 1.4;
-      ctx.fillStyle = `rgba(48, 38, 28, ${0.22 + Math.random() * 0.18})`;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+      cctx.fillStyle = `rgba(48, 38, 28, ${0.22 + Math.random() * 0.18})`;
+      cctx.beginPath(); cctx.arc(x, y, r, 0, Math.PI * 2); cctx.fill();
     }
   });
-
-  // Sparse mid-tone speckle for the in-between feel of soil between blades.
-  _wrappedStroke(() => {
-    for (let i = 0; i < 1200; i++) {
+  _wrappedDraw(cctx, SIZE, () => {
+    for (let i = 0; i < 1400; i++) {
       const x = Math.random() * SIZE;
       const y = Math.random() * SIZE;
       const r = 0.7 + Math.random() * 1.6;
-      ctx.fillStyle = `rgba(110, 95, 70, ${0.10 + Math.random() * 0.10})`;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+      cctx.fillStyle = `rgba(110, 95, 70, ${0.10 + Math.random() * 0.10})`;
+      cctx.beginPath(); cctx.arc(x, y, r, 0, Math.PI * 2); cctx.fill();
     }
   });
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  _groundDetailTexture = tex;
-  return tex;
+  // ─── Sobel filter on the height field → tangent-space normal map ───
+  const hData = hctx.getImageData(0, 0, SIZE, SIZE).data;
+  const normalCanvas = document.createElement('canvas');
+  normalCanvas.width = normalCanvas.height = SIZE;
+  const nctx = normalCanvas.getContext('2d');
+  const nimg = nctx.createImageData(SIZE, SIZE);
+  const ndata = nimg.data;
+  const strength = 2.2;
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const xm = (x - 1 + SIZE) % SIZE;
+      const xp = (x + 1) % SIZE;
+      const ym = (y - 1 + SIZE) % SIZE;
+      const yp = (y + 1) % SIZE;
+      const h00 = hData[(ym * SIZE + xm) * 4];
+      const h10 = hData[(ym * SIZE + x ) * 4];
+      const h20 = hData[(ym * SIZE + xp) * 4];
+      const h01 = hData[(y  * SIZE + xm) * 4];
+      const h21 = hData[(y  * SIZE + xp) * 4];
+      const h02 = hData[(yp * SIZE + xm) * 4];
+      const h12 = hData[(yp * SIZE + x ) * 4];
+      const h22 = hData[(yp * SIZE + xp) * 4];
+      const dx = ((h20 + 2*h21 + h22) - (h00 + 2*h01 + h02)) / 255 * strength;
+      const dy = ((h02 + 2*h12 + h22) - (h00 + 2*h10 + h20)) / 255 * strength;
+      const nx = -dx, ny = -dy, nz = 1.0;
+      const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+      const idx = (y * SIZE + x) * 4;
+      ndata[idx]   = Math.floor((nx / len * 0.5 + 0.5) * 255);
+      ndata[idx+1] = Math.floor((ny / len * 0.5 + 0.5) * 255);
+      ndata[idx+2] = Math.floor((nz / len * 0.5 + 0.5) * 255);
+      ndata[idx+3] = 255;
+    }
+  }
+  nctx.putImageData(nimg, 0, 0);
+
+  // ─── Macro overlay: low-frequency brightness variation ───
+  const MSIZE = 256;
+  const macroCanvas = document.createElement('canvas');
+  macroCanvas.width = macroCanvas.height = MSIZE;
+  const mctx = macroCanvas.getContext('2d');
+  const mimg = mctx.createImageData(MSIZE, MSIZE);
+  const mdata = mimg.data;
+  for (let py = 0; py < MSIZE; py++) {
+    for (let px = 0; px < MSIZE; px++) {
+      const u = px / MSIZE * Math.PI * 2;
+      const v = py / MSIZE * Math.PI * 2;
+      let s = 0;
+      s += Math.sin(u * 1 + 0.3) * Math.cos(v * 1 + 1.1);
+      s += Math.sin(u * 2 + 1.7) * Math.cos(v * 2 + 0.4) * 0.5;
+      s += Math.sin(u * 3 + 3.1) * Math.cos(v * 3 + 2.2) * 0.25;
+      s += (Math.random() - 0.5) * 0.10;
+      const v01 = 0.90 + s * 0.06;
+      const v8 = Math.max(0, Math.min(255, Math.floor(v01 * 255)));
+      const idx = (py * MSIZE + px) * 4;
+      mdata[idx] = mdata[idx+1] = mdata[idx+2] = v8;
+      mdata[idx+3] = 255;
+    }
+  }
+  mctx.putImageData(mimg, 0, 0);
+
+  // ─── Pack into Three textures ───
+  const colorTex = new THREE.CanvasTexture(colorCanvas);
+  colorTex.wrapS = colorTex.wrapT = THREE.RepeatWrapping;
+  colorTex.colorSpace = THREE.SRGBColorSpace;
+  colorTex.anisotropy = 8;
+
+  const normalTex = new THREE.CanvasTexture(normalCanvas);
+  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping;
+  normalTex.anisotropy = 8;
+
+  const macroTex = new THREE.CanvasTexture(macroCanvas);
+  macroTex.wrapS = macroTex.wrapT = THREE.RepeatWrapping;
+  macroTex.colorSpace = THREE.SRGBColorSpace;
+  macroTex.anisotropy = 4;
+
+  _groundColorTexture  = colorTex;
+  _groundNormalTexture = normalTex;
+  _groundMacroTexture  = macroTex;
+  return [colorTex, normalTex, macroTex];
 }
 
 function buildWorld() {
   // Town mode — no central city. cityCenter set far away so all "distance to city" checks pass.
-  const cityCenter = new THREE.Vector2(99999, 99999);
-  const cityRadius = 0;
+  // Mini city sits at world origin. Radius determines terrain-flattening zone
+  // and the area filled by buildCity() below.
+  const cityCenter = new THREE.Vector2(0, 0);
+  const cityRadius = 95;
 
   // ----- Ground mesh — higher res, FBM-driven vertex colors -----
   const SEGS = TERRAIN_SEGS;
@@ -1351,15 +1673,40 @@ function buildWorld() {
   groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   groundGeo.computeVertexNormals();
 
-  // Detail texture — tiles ~80x across the map so each tile spans ~MAP.size*2.4/80 m.
-  // Vertex colors still drive hue (biome palette); the texture adds fine grain
-  // and breaks up the smooth-blob look of pure vertex coloring.
-  const _groundTex = _buildGroundDetailTexture();
-  _groundTex.repeat.set(80, 80);
+  // Three textures cooperate for the final ground look:
+  //  - colorTex : sub-meter grass/dirt/blade detail (multiplied with vertex color)
+  //  - normalTex: procedural normals so blades catch directional light
+  //  - macroTex : low-frequency overlay sampled in-shader; kills tile repetition
+  // Repeats chosen so close-up reads as blades, far reads as patches.
+  const [colorTex, normalTex, macroTex] = _buildGroundTextures();
+  colorTex.repeat.set(80, 80);
+  normalTex.repeat.set(80, 80);
+
   const groundMat = new THREE.MeshLambertMaterial({
     vertexColors: true,
-    map: _groundTex,
+    map: colorTex,
+    normalMap: normalTex,
+    normalScale: new THREE.Vector2(0.85, 0.85),
   });
+  // Inject the macro overlay into the shader: sample at vMapUv * 0.05 (effective
+  // repeat of 4 across the map) and modulate diffuseColor by it. One extra
+  // texture fetch + multiply per fragment — negligible cost, big visual win.
+  groundMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uMacroTex = { value: macroTex };
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform sampler2D uMacroTex;'
+      )
+      .replace(
+        '#include <map_fragment>',
+        `
+        #include <map_fragment>
+        vec3 macroSample = texture2D(uMacroTex, vMapUv * 0.05).rgb;
+        diffuseColor.rgb *= mix(vec3(1.0), macroSample, 0.65);
+        `
+      );
+  };
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   ground.userData.isGround = true;
@@ -1393,24 +1740,24 @@ function buildWorld() {
     scene.add(w);
   }
 
-  // ----- TOWN LAYOUT (no central city, scattered neighborhoods + roads + cars) -----
-  const hoodPositions = [];
-  const numHoods = Math.max(22, Math.floor(MAP.size / 32));
-
+  // ─── TOWN LAYOUT: grid blocks of buildings + arterial streets ──────────────
+  // Replaces the older scattered-hood layout. We tile blocks across the play
+  // area; each block is a row×col grid of lots wired up by generateNeighborhood.
+  // Streets are then drawn along the block perimeters + along the lot-row gaps.
   const LOOT_WEAPONS = ['pistol','ar','smg','shotgun','sr','bat','crowbar'];
 
-  function spawnHouseLoot(hx, hz, facing) {
-    const itemCount = 2 + Math.floor(Math.random() * 3);
-    const lootPool = [...LOOT_WEAPONS].sort(() => Math.random()-0.5);
-    // Place loot INSIDE the house. House is 12x14 centered at (hx, hz).
-    // Drop loot in a 5x5 random area around the centre — always within the 4 walls.
+  function spawnHouseLoot(hx, hz, fp) {
+    // fp = { w, d } in metres — used so loot stays inside the building footprint.
+    if (Math.random() < 0.35) return;          // 35% of buildings spawn no loot at all
+    const itemCount = 1 + Math.floor(Math.random() * 2);  // 1–2 items (was 2–4)
+    const halfW = (fp ? fp.w : 10) * 0.30;
+    const halfD = (fp ? fp.d : 10) * 0.30;
     for (let i = 0; i < itemCount; i++) {
-      const lx = hx + (Math.random() - 0.5) * 5;
-      const lz = hz + (Math.random() - 0.5) * 5;
+      const lx = hx + (Math.random() - 0.5) * 2 * halfW;
+      const lz = hz + (Math.random() - 0.5) * 2 * halfD;
       const ly = sampleTerrainHeight(lx, lz) + 0.35;
       const roll = Math.random();
       if (roll < 0.45) {
-        // Weighted weapon pool
         const gunRoll = Math.random();
         let wk;
         if      (gunRoll < 0.10) wk = 'pistol';
@@ -1436,221 +1783,323 @@ function buildWorld() {
     }
   }
 
-  function makeNeighborhood(ncx, ncz) {
-    // Position passed in directly (no quadrant logic)
-
-    const houseCount = 5 + Math.floor(Math.random() * 5); // 5-9 houses
-    const circleR = 28 + Math.random() * 14; // radius of the neighborhood circle
-    const lootHouseIdx = Math.floor(Math.random() * houseCount);
-
-    for (let i = 0; i < houseCount; i++) {
-      const ang = (i / houseCount) * Math.PI * 2;
-      const hx = ncx + Math.cos(ang) * circleR;
-      const hz = ncz + Math.sin(ang) * circleR;
-      // rotation.y = ang+PI → local +Z faces toward centre (inward)
-      const facingAng = ang + Math.PI;
-
-      if (Math.hypot(hx - cityCenter.x, hz - cityCenter.y) < cityRadius + 50) continue;
-      if (Math.abs(hx) > MAP.size*0.82 || Math.abs(hz) > MAP.size*0.82) continue;
-
-      const isLootHouse = (i === lootHouseIdx);
-
-      if (isLootHouse) {
-        makeLootHouse(hx, hz, facingAng);
-        spawnHouseLoot(hx, hz, facingAng);
-        // Garbage can: spawn perpendicular, far enough to always be outside house (w=12, so w/2+3=9)
-        const doorDirX2 = Math.cos(ang + Math.PI);
-        const doorDirZ2 = Math.sin(ang + Math.PI);
-        const perpX2 = -doorDirZ2, perpZ2 = doorDirX2;
-        const canX = hx + perpX2 * 9;
-        const canZ = hz + perpZ2 * 9;
-        makeGarbageCan(canX, canZ, Math.random() * Math.PI * 2);
-      } else {
-        makeBuilding(hx, hz, 12, 14, 5.5, facingAng);
-        // Every non-loot house also spawns lighter ground loot (1-2 items at the front)
-        spawnHouseLoot(hx, hz, facingAng);
-      }
-
-      // (path removed — never lined up correctly)
-
-      // Tree behind house (opposite of door direction = toward ang)
-      if (Math.random() < 0.5) {
-        makeTree(hx + Math.cos(ang) * 9 + (Math.random()-0.5)*3,
-                 hz + Math.sin(ang) * 9 + (Math.random()-0.5)*3);
-      }
+  // Draw a flat-strip street segment along a straight axis, following terrain.
+  // (axis: 'x' = street runs along +X at fixed z; 'z' = along +Z at fixed x.)
+  function makeStreetStrip(cx, cz, length, width, axis) {
+    const segs = Math.max(4, Math.floor(length / 18));
+    const sx = axis === 'x' ? length : width;
+    const sz = axis === 'x' ? width  : length;
+    const geo = new THREE.PlaneGeometry(sx, sz, axis === 'x' ? segs : 1, axis === 'x' ? 1 : segs);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    const midY = sampleTerrainHeight(cx, cz);
+    for (let vi = 0; vi < pos.count; vi++) {
+      const wx = cx + pos.getX(vi);
+      const wz = cz + pos.getZ(vi);
+      pos.setY(vi, sampleTerrainHeight(wx, wz) - midY + 0.06);
     }
-
-    // Gravel circle removed — looked weird in tightly-packed neighborhoods
-  }
-
-  function makeLootHouse(x, z, facingAng) {
-    const w = 12, d = 14, h = 5.5;
-    const cs = BLDG_COLORS[Math.floor(Math.random()*BLDG_COLORS.length)];
-    const wallC = cs.wall, roofC = cs.roof, accentC = cs.accent;
-    const windowC = 0x2a3a4a, trimC = 0x222428;
-    const groundY = sampleTerrainHeight(x, z); // matches visible terrain (clamped)
-    const doorW = 1.8, doorH = 3.8; // much taller door
-    const sideW = (w - doorW) / 2;
-
-    const parts = [];
-    // Side walls (full)
-    parts.push({ geo: makeBoxGeo(0.4, h, d, -w/2, h/2, 0), color: wallC });
-    parts.push({ geo: makeBoxGeo(0.4, h, d,  w/2, h/2, 0), color: wallC });
-    // Back wall (full)
-    parts.push({ geo: makeBoxGeo(w, h, 0.4, 0, h/2, -d/2), color: wallC });
-    // Front wall — open door gap: left strip, right strip, lintel
-    parts.push({ geo: makeBoxGeo(sideW, h, 0.4, -(doorW/2+sideW/2), h/2, d/2), color: wallC });
-    parts.push({ geo: makeBoxGeo(sideW, h, 0.4,  (doorW/2+sideW/2), h/2, d/2), color: wallC });
-    // Only add lintel if door doesn't reach ceiling
-    if (doorH < h - 0.2) {
-      parts.push({ geo: makeBoxGeo(doorW, h-doorH, 0.4, 0, doorH+(h-doorH)/2, d/2), color: wallC });
+    pos.needsUpdate = true;
+    if (!makeStreetStrip._mat) {
+      makeStreetStrip._mat = new THREE.MeshLambertMaterial({
+        color: 0x282826,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      });
     }
-    // Door frame trim
-    parts.push({ geo: makeBoxGeo(doorW+0.15, 0.12, 0.08, 0, doorH, d/2+0.05), color: trimC });
-    parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08, -(doorW/2), doorH/2, d/2+0.05), color: trimC });
-    parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08,  (doorW/2), doorH/2, d/2+0.05), color: trimC });
-    // Foundation
-    parts.push({ geo: makeBoxGeo(w+0.4, 0.6, d+0.4, 0, 0.3, 0), color: accentC });
-    parts.push({ geo: makeBoxGeo(w+0.8, 2.5, d+0.8, 0, -1.25, 0), color: 0x2a2828 });
-    // Windows — sides and back ONLY, not front face
-    const winW = 1.0, winH = 1.2, wy = h*0.35;
-    const winColsZ = Math.max(1, Math.floor(d/4));
-    // Side windows (X faces)
-    parts.push({ geo: makeBoxGeo(0.04, winH, winW, -w/2-0.025, wy, -d/4), color: windowC });
-    parts.push({ geo: makeBoxGeo(0.04, winH, winW, -w/2-0.025, wy,  d/4), color: windowC });
-    parts.push({ geo: makeBoxGeo(0.04, winH, winW,  w/2+0.025, wy, -d/4), color: windowC });
-    parts.push({ geo: makeBoxGeo(0.04, winH, winW,  w/2+0.025, wy,  d/4), color: windowC });
-    // Back windows only
-    for (let c=0; c<winColsZ; c++) {
-      const wz = -d/2 + (d/(winColsZ+1))*(c+1);
-      parts.push({ geo: makeBoxGeo(winW, winH, 0.04, -w/4, wy, -d/2-0.025), color: windowC });
-      parts.push({ geo: makeBoxGeo(winW, winH, 0.04,  w/4, wy, -d/2-0.025), color: windowC });
-      break; // just 2 back windows
-    }
-    // Hip roof
-    const rh=1.4, overhang=0.4;
-    const W=w+overhang*2, D=d+overhang*2, ridgeLen=D*0.55;
-    const slopeAngleX=Math.atan2(rh,D/2-ridgeLen*0.05);
-    const slopeLen=Math.sqrt((D/2)*(D/2)+rh*rh);
-    parts.push({ geo: makeBoxGeo(W,0.22,slopeLen,0,h+rh/2, D/4, slopeAngleX,0,0), color:roofC });
-    parts.push({ geo: makeBoxGeo(W,0.22,slopeLen,0,h+rh/2,-D/4,-slopeAngleX,0,0), color:roofC });
-    const slopeAngleZ=Math.atan2(rh,W/2), slopeLenZ=Math.sqrt((W/2)*(W/2)+rh*rh);
-    parts.push({ geo: makeBoxGeo(slopeLenZ,0.22,ridgeLen, W/4,h+rh/2,0,0,0,-slopeAngleZ), color:roofC });
-    parts.push({ geo: makeBoxGeo(slopeLenZ,0.22,ridgeLen,-W/4,h+rh/2,0,0,0, slopeAngleZ), color:roofC });
-
-    if (!makeBuilding._mat) makeBuilding._mat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    const mesh = makeMergedMesh(parts, makeBuilding._mat);
-    for (const p of parts) p.geo.dispose();
-    if (!mesh) return;
-    mesh.position.set(x, groundY, z);
-    mesh.rotation.y = facingAng;
-    mesh.castShadow = false; mesh.receiveShadow = true;
+    const mesh = new THREE.Mesh(geo, makeStreetStrip._mat);
+    mesh.position.set(cx, midY, cz);
+    mesh.receiveShadow = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
     scene.add(mesh);
-
-    // Add LOS-blocking collision boxes for three walls (no lateral movement block, just LOS).
-    // The front wall (with the door) is intentionally omitted so bots can't see through
-    // the side/back walls but entry through the doorway isn't blocked visually or for LOS.
-    const halfW = (w / 2) * 1.05, halfD = (d / 2) * 1.05;
-    const wallThick = 0.5;
-    const houseY = groundY;
-    function addWallSentinel(cx, cz, ww, wd) {
-      const obj = new THREE.Object3D();
-      const bbox = new THREE.Box3(
-        new THREE.Vector3(cx - ww/2, houseY - 0.3, cz - wd/2),
-        new THREE.Vector3(cx + ww/2, houseY + h + 0.5, cz + wd/2)
-      );
-      obj.userData.bbox = bbox;
-      obj.userData.losOnly = true; // don't block player movement
-      buildings.push(obj);
-    }
-    // Rotate wall centres into world space
-    const cos = Math.cos(facingAng), sin = Math.sin(facingAng);
-    function rot(lx, lz) {
-      return { x: x + lx*cos - lz*sin, z: z + lx*sin + lz*cos };
-    }
-    // left wall  (local -x face)
-    const lw = rot(-halfW, 0); addWallSentinel(lw.x, lw.z, wallThick, d + wallThick*2);
-    // right wall (local +x face)
-    const rw = rot( halfW, 0); addWallSentinel(rw.x, rw.z, wallThick, d + wallThick*2);
-    // back wall  (local -z face, opposite door)
-    const bk = rot(0, -halfD); addWallSentinel(bk.x, bk.z, w + wallThick*2, wallThick);
-    // front wall (local +z, has door) — NO sentinel: keeps door entry open for LOS too
   }
 
-  // Generate scattered neighborhood positions across the whole map
-  for (let i = 0; i < numHoods; i++) {
-    let nx, nz, tries = 0;
-    do {
-      nx = (Math.random() - 0.5) * MAP.size * 1.0;
-      nz = (Math.random() - 0.5) * MAP.size * 1.0;
-      tries++;
-    } while (hoodPositions.some(p => Math.hypot(p[0]-nx, p[1]-nz) < 95) && tries < 30);
-    hoodPositions.push([nx, nz]);
-    makeNeighborhood(nx, nz);
-  }
-
-  // Distance from point p to line segment a→b (used to skip roads that pass through other hoods)
-  function _ptToSeg(p, a, b) {
-    const sdx = b[0] - a[0], sdz = b[1] - a[1];
-    const l2 = sdx*sdx + sdz*sdz;
-    if (l2 < 0.001) return Math.hypot(p[0]-a[0], p[1]-a[1]);
-    let t = ((p[0]-a[0]) * sdx + (p[1]-a[1]) * sdz) / l2;
-    t = Math.max(0, Math.min(1, t));
-    const cx = a[0] + sdx*t, cz = a[1] + sdz*t;
-    return Math.hypot(p[0]-cx, p[1]-cz);
-  }
-
-  // Connect each hood to its 2 nearest neighbors with roads.
-  // Skip roads that would slice through ANOTHER hood.
-  const roadDone = new Set();
-  const HOOD_AVOID = 68; // road centerline stays past house extents (worst case ~51 from hood center) + 17 buffer
-  for (let i = 0; i < hoodPositions.length; i++) {
-    const candidates = [];
-    for (let j = 0; j < hoodPositions.length; j++) {
-      if (i === j) continue;
-      const d = Math.hypot(hoodPositions[j][0]-hoodPositions[i][0], hoodPositions[j][1]-hoodPositions[i][1]);
-      candidates.push({ j, d });
+  // Like makeStreetStrip but accepts two endpoints and orients the plane at
+  // the line's actual angle. Follows terrain along the length. No HOOD_R trim
+  // (the older makeRoadSegment has one that's stale).
+  function drawOrientedStreet(x1, z1, x2, z2, width) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const length = Math.hypot(dx, dz);
+    if (length < 1) return;
+    const angle = Math.atan2(dz, dx);
+    const segs = Math.max(4, Math.floor(length / 18));
+    const geo = new THREE.PlaneGeometry(length, width, segs, 1);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    const midX = (x1 + x2) / 2, midZ = (z1 + z2) / 2;
+    const midY = sampleTerrainHeight(midX, midZ);
+    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+    for (let vi = 0; vi < pos.count; vi++) {
+      const lx = pos.getX(vi), lz = pos.getZ(vi);
+      const wx = midX + lx * cosA - lz * sinA;
+      const wz = midZ + lx * sinA + lz * cosA;
+      pos.setY(vi, sampleTerrainHeight(wx, wz) - midY + 0.06);
     }
-    candidates.sort((a, b) => a.d - b.d);
-    let connected = 0;
-    for (const { j, d } of candidates) {
-      if (connected >= 2 || d > 280) break;
-      const key = Math.min(i, j) + ':' + Math.max(i, j);
-      if (roadDone.has(key)) continue;
+    pos.needsUpdate = true;
+    if (!makeStreetStrip._mat) {
+      makeStreetStrip._mat = new THREE.MeshLambertMaterial({
+        color: 0x282826,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      });
+    }
+    const mesh = new THREE.Mesh(geo, makeStreetStrip._mat);
+    mesh.position.set(midX, midY, midZ);
+    mesh.rotation.y = -angle;
+    mesh.receiveShadow = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    scene.add(mesh);
+  }
 
-      // Skip if road passes too close to a different hood
-      let crossesHood = false;
-      for (let k = 0; k < hoodPositions.length; k++) {
-        if (k === i || k === j) continue;
-        if (_ptToSeg(hoodPositions[k], hoodPositions[i], hoodPositions[j]) < HOOD_AVOID) {
-          crossesHood = true; break;
+  // Take a BuildResult from buildings.js and wire it into the world: lift its
+  // mesh onto terrain, register sentinels for LOS, optionally spawn loot inside.
+  function commitBuild(built, opts = {}) {
+    if (!built) return;
+    // Lift mesh onto terrain (placeBuilding already did this, but recompute for
+    // safety in case the caller skipped deps).
+    const gy = sampleTerrainHeight(built.mesh.position.x, built.mesh.position.z);
+    built.mesh.position.y = gy;
+    scene.add(built.mesh);
+    if (built.driveway) {
+      built.driveway.position.y = sampleTerrainHeight(built.driveway.position.x, built.driveway.position.z) + 0.04;
+      scene.add(built.driveway);
+    }
+    // Push LOS sentinels onto the buildings array (so bots can't see through walls)
+    for (const s of built.sentinels) buildings.push(s);
+    // Loot inside, if requested
+    if (opts.loot) spawnHouseLoot(built.mesh.position.x, built.mesh.position.z, built.footprint);
+  }
+
+  // ── Mini city at world centre ──────────────────────────────────────────
+  // buildCity() generates a self-contained grid of multi-story office blocks
+  // with sidewalks, streets, and ground-collision slabs. Tuned to a compact
+  // radius so it reads as a small downtown rather than a metropolis.
+  buildCity(0, 0, cityRadius);
+
+  // ── Themed POIs around the play area ───────────────────────────────────
+  const POI_DIST = MAP.size * 0.55;
+  const POI_ROAD = 8;
+
+  // ── Theme config (lookup table) ──
+  // model     : THREE.Group pool that the picker draws from
+  // primary   : main name pool — picked with probability p
+  // secondary : fallback name pool — picked with probability 1-p
+  // p         : probability of drawing from `primary` instead of `secondary`
+  // (Farm uses combined pool of all rural buildings, no secondary.)
+  //
+  // spacing knobs:
+  // colGap     : grass between adjacent houses in a row (m)
+  // withinPair : back-yard depth between paired rows (m)
+  // betweenPair: asphalt road between row-pairs (m)
+  // jitterXZ   : per-house random position wiggle (m, ± in both axes)
+  // jitterRot  : per-house rotation wiggle (radians)
+  // scaleRange : building target size as fraction of min(lotW,lotD)
+  // treeChance : probability of placing a tree in this house's yard
+  const SPACING_RESIDENTIAL = {
+    colGap: 5.0, withinPair: 8.0, betweenPair: 14.0,
+    jitterXZ: 2.8, jitterRot: 0.18, scaleRange: [0.55, 0.78], treeChance: 0.50,
+  };
+  const SPACING_DENSE = {
+    colGap: 3.0, withinPair: 4.5, betweenPair: 12.0,
+    jitterXZ: 1.2, jitterRot: 0.05, scaleRange: [0.78, 0.86], treeChance: 0.25,
+  };
+  const SPACING_COMMERCIAL = {
+    colGap: 2.5, withinPair: 5.0, betweenPair: 12.0,
+    jitterXZ: 1.0, jitterRot: 0.04, scaleRange: [0.75, 0.85], treeChance: 0.15,
+  };
+  // Only the farm theme has loaded buildings right now (rural OBJs). Every
+  // other theme returns null from _pickByTheme — those POIs will be empty
+  // until the new residential asset pack arrives.
+  const THEMES = {
+    farm:       { spacing: SPACING_RESIDENTIAL },
+    suburbs:    { spacing: SPACING_RESIDENTIAL },
+    apartments: { spacing: SPACING_DENSE },
+    oldtown:    { spacing: SPACING_RESIDENTIAL },
+    village:    { spacing: SPACING_RESIDENTIAL },
+    commercial: { spacing: SPACING_COMMERCIAL },
+  };
+
+  // Returns a loaded THREE.Group from `pool` whose name appears in `names`,
+  // or null if none have loaded yet.
+  function _pickFrom(pool, names) {
+    const filtered = names.filter(n => pool[n]);
+    if (!filtered.length) return null;
+    return pool[filtered[Math.floor(Math.random() * filtered.length)]];
+  }
+
+  function _pickByTheme(theme) {
+    if (theme === 'farm') {
+      return _pickFrom(IMPORTED_RURAL_MODELS, [...RURAL_GROUPS.big, ...RURAL_GROUPS.small]);
+    }
+    // Residential GLB pool (currently just casa_japo). Used by every non-farm
+    // theme until more variety is wired in.
+    const res = _pickFrom(IMPORTED_RESIDENTIAL_MODELS, IMPORTED_RESIDENTIAL_NAMES);
+    if (res) return res;
+    return null;
+  }
+
+  // Six themed POIs — 4 at the corners + 2 cardinal (N, S). Non-farm POIs
+  // use a PAIR-based layout: rows are paired back-to-back (back yards meet,
+  // no road between them) and pairs are separated by asphalt. The farm POI
+  // uses scattered placement — one central big barn ringed by outbuildings.
+  // Lots are *generous* — the building takes 55-78% of the lot so each lot
+  // has grass on every side instead of feeling like an "internment camp".
+  const poiSpots = [
+    { x: -POI_DIST, z: -POI_DIST, seed: 101, theme: 'farm',       rows: 4, cols: 4, lotW: 22, lotD: 20 },
+    { x:  POI_DIST, z: -POI_DIST, seed: 202, theme: 'suburbs',    rows: 4, cols: 4, lotW: 20, lotD: 16 },
+    { x: -POI_DIST, z:  POI_DIST, seed: 303, theme: 'apartments', rows: 4, cols: 4, lotW: 16, lotD: 16 },
+    { x:  POI_DIST, z:  POI_DIST, seed: 404, theme: 'oldtown',    rows: 4, cols: 4, lotW: 18, lotD: 14 },
+    { x:           0, z: -POI_DIST, seed: 505, theme: 'village',    rows: 4, cols: 4, lotW: 20, lotD: 16 },
+    { x:           0, z:  POI_DIST, seed: 606, theme: 'commercial', rows: 4, cols: 4, lotW: 17, lotD: 14 },
+  ];
+
+  function _placeYardTree(lotCx, lotCz, lotW, lotD, rotY) {
+    const fx = Math.sin(rotY), fz = Math.cos(rotY);   // building's forward
+    const sx = Math.cos(rotY), sz = -Math.sin(rotY);  // building's right
+    let lx, ly;
+    if (Math.random() < 0.55) {
+      // Back yard
+      lx = -lotD * 0.40;
+      ly = (Math.random() - 0.5) * lotW * 0.7;
+    } else {
+      // Side yard
+      lx = (Math.random() - 0.5) * lotD * 0.5;
+      ly = (Math.random() < 0.5 ? -1 : 1) * lotW * 0.45;
+    }
+    makeTree(lotCx + fx * lx + sx * ly, lotCz + fz * lx + sz * ly);
+  }
+
+  for (const poi of poiSpots) {
+    if (poi.theme === 'farm') {
+      // ── Farm POI: scattered organic placement ────────────────────────
+      // One large central barn, then 6-10 outbuildings ringed around it at
+      // random distances and angles. No streets — just dirt and grass.
+      const center = { x: poi.x, z: poi.z };
+      const centralFarmCandidates = ['BigBarn', 'Barn', 'Silo_House'].filter(n => IMPORTED_RURAL_MODELS[n]);
+      if (centralFarmCandidates.length) {
+        const centralName = centralFarmCandidates[Math.floor(Math.random() * centralFarmCandidates.length)];
+        _spawnImportedBuilding(IMPORTED_RURAL_MODELS[centralName], center.x, center.z, Math.random() * Math.PI * 2, 24);
+        spawnHouseLoot(center.x, center.z, { w: 22, d: 22 });
+      }
+      const outCount = 5 + Math.floor(Math.random() * 3);   // 5–7 outbuildings
+      const outBuildingNames = ['SmallBarn', 'OpenBarn', 'Silo', 'ChickenCoop', 'WaterTower', 'Well', 'Windmill', 'TowerWindmill'];
+      const FARM_OUT_SIZE = { Well: 2, ChickenCoop: 6, WaterTower: 8, Windmill: 8 };
+      const _placedFarm = [{x: center.x, z: center.z, r: 14}];
+      for (let i = 0; i < outCount; i++) {
+        let bx, bz, tries = 0;
+        do {
+          const ang = (i / outCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+          const dist = 34 + Math.random() * 22;                  // pushed out further
+          bx = center.x + Math.cos(ang) * dist;
+          bz = center.z + Math.sin(ang) * dist;
+          tries++;
+        } while (tries < 8 && _placedFarm.some(p => Math.hypot(bx - p.x, bz - p.z) < p.r + 10));
+        const nm = outBuildingNames[Math.floor(Math.random() * outBuildingNames.length)];
+        if (!IMPORTED_RURAL_MODELS[nm]) continue;
+        const targetSize = FARM_OUT_SIZE[nm] ?? 12;
+        _spawnImportedBuilding(IMPORTED_RURAL_MODELS[nm], bx, bz, Math.random() * Math.PI * 2, targetSize);
+        spawnHouseLoot(bx, bz, { w: targetSize, d: targetSize });
+        _placedFarm.push({ x: bx, z: bz, r: targetSize / 2 + 2 });
+      }
+      // Trees scattered around the farm — pushed out to match the larger farm
+      for (let t = 0; t < 16; t++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = 45 + Math.random() * 32;
+        makeTree(center.x + Math.cos(ang) * r, center.z + Math.sin(ang) * r);
+      }
+      continue;
+    }
+
+    // ── Non-farm POIs: pure scatter placement (no roads) ────────────────
+    // Same approach as the farm POI: random positions inside a POI radius
+    // with a min-spacing rejection check. Each building gets a random
+    // rotation, random scale, and an optional yard tree.
+    const spacing = (THEMES[poi.theme] || THEMES.suburbs).spacing;
+    const POI_R = 60;                                      // larger area
+    const SCATTER_MIN_SPACE = 22;                          // accommodates 1.5×-sized houses
+    const TARGET_BUILDINGS = 8 + Math.floor(Math.random() * 4);  // 8–11 per POI
+
+    const placedCenters = [];
+    let lootCandidate = null;
+    for (let attempts = 0; attempts < TARGET_BUILDINGS * 4 && placedCenters.length < TARGET_BUILDINGS; attempts++) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = Math.random() * POI_R;
+      const bx = poi.x + Math.cos(ang) * r;
+      const bz = poi.z + Math.sin(ang) * r;
+      if (placedCenters.some(p => Math.hypot(p.x - bx, p.z - bz) < SCATTER_MIN_SPACE)) continue;
+      placedCenters.push({ x: bx, z: bz });
+      const rotY = Math.random() * Math.PI * 2;
+      const sMin = spacing.scaleRange[0], sMax = spacing.scaleRange[1];
+      const scaleFrac = sMin + Math.random() * (sMax - sMin);
+      const targetSize = 21 * scaleFrac;       // 1.5× base — houses are bigger
+      const model = _pickByTheme(poi.theme);
+      const placed = _spawnImportedBuilding(model, bx, bz, rotY, targetSize);
+      if (placed) {
+        spawnHouseLoot(bx, bz, { w: targetSize, d: targetSize });
+        if (!lootCandidate || Math.random() < 0.06) lootCandidate = { x: bx, z: bz, w: targetSize };
+        // Yard tree: just stick it 4-8m away in a random direction
+        if (Math.random() < spacing.treeChance) {
+          const treeAng = Math.random() * Math.PI * 2;
+          const treeDist = 4 + Math.random() * 4;
+          makeTree(bx + Math.cos(treeAng) * treeDist, bz + Math.sin(treeAng) * treeDist);
         }
       }
-      if (crossesHood) continue;
+    }
+    // Bonus loot for one random house
+    if (lootCandidate) spawnHouseLoot(lootCandidate.x, lootCandidate.z, { w: lootCandidate.w, d: lootCandidate.w });
 
-      roadDone.add(key);
-      makeRoadSegment(hoodPositions[i], hoodPositions[j]);
-      connected++;
+    // ── A few cars parked between buildings (random positions, no streets) ──
+    const placedCarBoxes = [];
+    for (let i = 0; i < 4 + Math.floor(Math.random() * 3); i++) {
+      let cx, cz, tries = 0;
+      do {
+        const ang = Math.random() * Math.PI * 2;
+        const r = 10 + Math.random() * (POI_R - 10);
+        cx = poi.x + Math.cos(ang) * r;
+        cz = poi.z + Math.sin(ang) * r;
+        tries++;
+      } while (tries < 8 && (
+        placedCenters.some(p => Math.hypot(p.x - cx, p.z - cz) < 6) ||
+        placedCarBoxes.some(b => Math.hypot(b.x - cx, b.z - cz) < 5)
+      ));
+      if (tries >= 8) continue;
+      placedCarBoxes.push({ x: cx, z: cz });
+      makeCar(cx, cz, Math.random() * Math.PI * 2);
+    }
+
+    // Perimeter trees
+    for (let t = 0; t < 14; t++) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = POI_R * 0.85 + Math.random() * 18;
+      makeTree(poi.x + Math.cos(ang) * r, poi.z + Math.sin(ang) * r);
     }
   }
 
-  // Lone loot houses scattered outside city
-  const numTowns = Math.max(2, Math.floor(MAP.size/220));
-  for (let t=0; t<numTowns; t++) {
-    let lhx, lhz, attempts = 0;
+  // ── Scattered lone buildings out in the wilderness ─────────────────────
+  // 8-12 single buildings dotted around the map between POIs and the city.
+  // Skips spots inside the city, inside any POI block, or too close to map edge.
+  function _farFromPois(x, z, minDist = 95) {
+    if (Math.hypot(x - cityCenter.x, z - cityCenter.y) < cityRadius + 40) return false;
+    for (const p of poiSpots) {
+      if (Math.hypot(x - p.x, z - p.z) < minDist) return false;
+    }
+    return true;
+  }
+  const loneCount = 10 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < loneCount; i++) {
+    let lx, lz, tries = 0;
     do {
-      lhx = (Math.random()-0.5) * MAP.size*1.6;
-      lhz = (Math.random()-0.5) * MAP.size*1.6;
-      attempts++;
-    } while (Math.hypot(lhx - cityCenter.x, lhz - cityCenter.y) < cityRadius + 80 && attempts < 12);
-    const facingAng = Math.random() * Math.PI * 2;
-    makeLootHouse(lhx, lhz, facingAng);
-    spawnHouseLoot(lhx, lhz, facingAng);
-    makeGarbageCan(
-      lhx + Math.cos(facingAng+Math.PI/2)*7.0,
-      lhz + Math.sin(facingAng+Math.PI/2)*7.0,
-      Math.random()*Math.PI*2
-    );
+      lx = (Math.random() - 0.5) * MAP.size * 1.4;
+      lz = (Math.random() - 0.5) * MAP.size * 1.4;
+      tries++;
+    } while (!_farFromPois(lx, lz) && tries < 20);
+    if (tries >= 20) continue;
+    // Only rural buildings available right now (residential pack removed)
+    const model = _pickFrom(IMPORTED_RURAL_MODELS, IMPORTED_RURAL_NAMES);
+    const targetSize = 11 + Math.random() * 5;
+    if (!model) continue;
+    const rotY = Math.random() * Math.PI * 2;
+    const placed = _spawnImportedBuilding(model, lx, lz, rotY, targetSize);
+    if (placed) spawnHouseLoot(lx, lz, { w: targetSize, d: targetSize });
   }
 
   // ── Vegetation scatter — cluster-based for natural groupings ──────────────
@@ -1665,7 +2114,7 @@ function buildWorld() {
   }
 
   // Forest clusters — dense groups of trees
-  const forestCount = 18 + Math.floor(Math.random() * 8);
+  const forestCount = 10 + Math.floor(Math.random() * 5);
   for (let f = 0; f < forestCount; f++) {
     const [fx, fz] = randPos();
     if (inCity(fx, fz, 60)) continue;
@@ -1695,7 +2144,7 @@ function buildWorld() {
   }
 
   // Scattered solo/pair trees outside forests
-  const soloTrees = Math.floor(MAP.size * 0.25);
+  const soloTrees = Math.floor(MAP.size * 0.15);
   for (let i = 0; i < soloTrees; i++) {
     const [tx, tz] = randPos();
     if (inCity(tx, tz, 20)) continue;
@@ -1703,7 +2152,7 @@ function buildWorld() {
     if (th < WATER_LEVEL_VEG + 1.0) continue;
     makeTree(tx, tz);
     // Occasionally a companion tree nearby
-    if (Math.random() < 0.65) {
+    if (Math.random() < 0.40) {
       makeTree(tx + (Math.random()-0.5)*6, tz + (Math.random()-0.5)*6);
     }
   }
@@ -1732,7 +2181,7 @@ function buildWorld() {
   }
 
   // Bushes — near water, forest edges, open fields
-  const bushCount = Math.floor(MAP.size * 0.40);
+  const bushCount = Math.floor(MAP.size * 0.25);
   for (let i = 0; i < bushCount; i++) {
     const [bx, bz] = randPos();
     if (inCity(bx, bz, 55)) continue;
@@ -1988,6 +2437,17 @@ const CITY_BLDG_COLORS = [
   { wall: 0x9a8870, accent: 0x6a5e4e },  // warm limestone
 ];
 function makeCityBuilding(cx, cz, blockSize) {
+  // Use the dedicated GLB downtown buildings when loaded. Falls through to
+  // the procedural multi-story builder below if none are available.
+  const cityGlbNames = IMPORTED_CITY_NAMES.filter(n => IMPORTED_CITY_MODELS[n]);
+  if (cityGlbNames.length) {
+    const name = cityGlbNames[Math.floor(Math.random() * cityGlbNames.length)];
+    const rotY = Math.floor(Math.random() * 4) * (Math.PI / 2);
+    _spawnImportedBuilding(IMPORTED_CITY_MODELS[name], cx, cz, rotY, blockSize - 4);
+    return;
+  }
+
+  // ── Procedural fallback (used only if no imported models loaded) ─────
   const stories = 4 + Math.floor(Math.random()*9); // 4–12 stories
   const storyH = 3.6 + Math.random()*0.5;           // 3.6–4.1m per floor
   const totalH = stories * storyH;
@@ -2121,6 +2581,17 @@ function flushCityMeshes() {
 // Reduces draw calls from ~15-20 per car down to ~3-5.
 function _flattenCar(car) {
   car.updateMatrixWorld(true);
+  // OBJ cars often have a single mesh with a multi-material array + geometry
+  // groups (one group per `usemtl` directive). Flattening would require
+  // extracting each group as a sub-geometry which is brittle — instead, just
+  // skip the flatten and let the renderer handle the multi-material mesh
+  // natively. The trade-off is a few extra draw calls per car.
+  let multiMaterial = false;
+  car.traverse(c => {
+    if (c.isMesh && Array.isArray(c.material) && c.material.length > 1) multiMaterial = true;
+  });
+  if (multiMaterial) return car;
+
   const byMat = new Map();
   car.traverse(c => {
     if (!c.isMesh) return;
@@ -2171,14 +2642,18 @@ const CAR_COLORS = [
   0x2a2a30, 0x4a4a55, 0x701a1a, 0x223340, 0x6a4a30, 0x444844, 0x382a22, 0x8a2018, 0x5a5a60
 ];
 function makeCar(x, z, rot, overrideY) {
-  // Try GLTF car models first
-  const _carMdls = [];
-  if (LOWPOLYCAR_MODEL)  _carMdls.push(LOWPOLYCAR_MODEL);
-  if (TOYOTA_MODEL)      _carMdls.push(TOYOTA_MODEL);
-  if (RACECAR_MODEL)     _carMdls.push(RACECAR_MODEL);
-  if (FREELOWPOLY_MODEL) _carMdls.push(FREELOWPOLY_MODEL);
-  if (VAN_MODEL)         _carMdls.push(VAN_MODEL);
-  if (MUSCLECAR_MODEL)   _carMdls.push(MUSCLECAR_MODEL);
+  // Lazy-cache the car pool — built on first call after all preloads finish.
+  // Mixes GLTF cars (LOWPOLYCAR…MUSCLECAR) with the imported OBJ cars.
+  if (!makeCar._pool) {
+    const pool = [];
+    for (const m of [LOWPOLYCAR_MODEL, TOYOTA_MODEL, RACECAR_MODEL,
+                     FREELOWPOLY_MODEL, VAN_MODEL, MUSCLECAR_MODEL]) {
+      if (m) pool.push(m);
+    }
+    for (const k of Object.keys(IMPORTED_CAR_MODELS)) pool.push(IMPORTED_CAR_MODELS[k]);
+    makeCar._pool = pool;
+  }
+  const _carMdls = makeCar._pool;
   if (_carMdls.length > 0) {
     const _gY = (overrideY !== undefined) ? overrideY
       : (world && Math.hypot(x - world.cityCenter.x, z - world.cityCenter.y) < world.cityRadius + 20)
@@ -2561,129 +3036,8 @@ function makeParkingLot(cx, cz, blockSize, baseY) {
   scene.add(laneStripe);
 }
 
-// ----- Buildings: warehouses, houses, sheds with windows + varied roofs -----
-const BLDG_COLORS = [
-  { wall: 0xa08e78, roof: 0x4a2a1e, accent: 0x706050 },  // warm beige stucco
-  { wall: 0x7c8a8e, roof: 0x283040, accent: 0x546066 },  // slate-gray clapboard
-  { wall: 0xa87868, roof: 0x3a1a14, accent: 0x705248 },  // terracotta brick
-  { wall: 0x72705e, roof: 0x2a2a1c, accent: 0x504e40 },  // olive cement
-  { wall: 0xc8b48e, roof: 0x5c3c28, accent: 0x9e8872 },  // tan adobe
-  { wall: 0x8a6e58, roof: 0x382014, accent: 0x604638 },  // dark wood siding
-  { wall: 0x889070, roof: 0x303824, accent: 0x586048 },  // sage green
-];
-function makeBuilding(x, z, fixedW, fixedD, fixedH, rotY) {
-  const w = fixedW || (8 + Math.random()*16);
-  const d = fixedD || (8 + Math.random()*16);
-  const h = fixedH || (4 + Math.random()*8);
-  const cs = BLDG_COLORS[Math.floor(Math.random()*BLDG_COLORS.length)];
-  const wallC = cs.wall, roofC = cs.roof, accentC = cs.accent;
-  const trimC = 0x222428;
-  const windowC = 0x2a3a4a;
-
-  // Sit on the actual terrain height at this position (matches visible clamped mesh)
-  const groundY = sampleTerrainHeight(x, z);
-
-  const parts = [];
-  // ── HOLLOW interior: 4 walls with a door opening on the front (+Z) face ──
-  const doorW = 1.8, doorH = Math.min(3.8, h - 0.4);
-  const sideW = (w - doorW) / 2;
-  // Left + right walls (full)
-  parts.push({ geo: makeBoxGeo(0.4, h, d, -w/2, h/2, 0), color: wallC });
-  parts.push({ geo: makeBoxGeo(0.4, h, d,  w/2, h/2, 0), color: wallC });
-  // Back wall (full)
-  parts.push({ geo: makeBoxGeo(w, h, 0.4, 0, h/2, -d/2), color: wallC });
-  // Front wall — left strip, right strip, lintel above door
-  parts.push({ geo: makeBoxGeo(sideW, h, 0.4, -(doorW/2+sideW/2), h/2, d/2), color: wallC });
-  parts.push({ geo: makeBoxGeo(sideW, h, 0.4,  (doorW/2+sideW/2), h/2, d/2), color: wallC });
-  if (doorH < h - 0.2) {
-    parts.push({ geo: makeBoxGeo(doorW, h-doorH, 0.4, 0, doorH+(h-doorH)/2, d/2), color: wallC });
-  }
-  // Door frame trim
-  parts.push({ geo: makeBoxGeo(doorW+0.15, 0.12, 0.08, 0, doorH, d/2+0.05), color: trimC });
-  parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08, -(doorW/2), doorH/2, d/2+0.05), color: trimC });
-  parts.push({ geo: makeBoxGeo(0.12, doorH, 0.08,  (doorW/2), doorH/2, d/2+0.05), color: trimC });
-
-  // Foundation
-  parts.push({ geo: makeBoxGeo(w+0.4, 0.6, d+0.4, 0, 0.3, 0), color: accentC });
-
-  // Windows on sides and back (NOT front — door is there)
-  const winRows = h > 6 ? 2 : 1;
-  const winColsZ = Math.max(1, Math.floor(d / 4));
-  const winColsX = Math.max(1, Math.floor(w / 4));
-  const winW = 1.0, winH = 1.2;
-  for (let r=0; r<winRows; r++) {
-    const wy = (r === 0) ? h*0.32 : h*0.65;
-    // Back face windows only (front has the door)
-    for (let c=0; c<winColsX; c++) {
-      const wx = -w/2 + (w/(winColsX+1)) * (c+1);
-      parts.push({ geo: makeBoxGeo(winW, winH, 0.04, wx, wy, -d/2 - 0.025), color: windowC });
-    }
-    for (let c=0; c<winColsZ; c++) {
-      const wz = -d/2 + (d/(winColsZ+1)) * (c+1);
-      parts.push({ geo: makeBoxGeo(0.04, winH, winW, -w/2 - 0.025, wy, wz), color: windowC });
-      parts.push({ geo: makeBoxGeo(0.04, winH, winW,  w/2 + 0.025, wy, wz), color: windowC });
-    }
-  }
-
-  // Roof: flat parapet (50%) or simple hip/shed (50%)
-  const roofType = Math.random();
-  if (roofType < 0.5) {
-    parts.push({ geo: makeBoxGeo(w+0.3, 0.25, d+0.3, 0, h + 0.12, 0), color: roofC });
-    parts.push({ geo: makeBoxGeo(w+0.5, 0.5, d+0.5, 0, h + 0.25, 0), color: accentC });
-    parts.push({ geo: makeBoxGeo(w-0.2, 0.5, d-0.2, 0, h + 0.25, 0), color: roofC });
-  } else {
-    const rh = 1.2 + Math.random()*1.4;
-    const overhang = 0.4;
-    const W = w + overhang*2, D = d + overhang*2;
-    const ridgeLen = D * 0.55;
-    const slopeAngleX = Math.atan2(rh, D/2 - ridgeLen*0.05);
-    const slopeLen = Math.sqrt((D/2)*(D/2) + rh*rh);
-    parts.push({ geo: makeBoxGeo(W, 0.22, slopeLen, 0, h + rh/2,  D/4, slopeAngleX, 0, 0), color: roofC });
-    parts.push({ geo: makeBoxGeo(W, 0.22, slopeLen, 0, h + rh/2, -D/4, -slopeAngleX, 0, 0), color: roofC });
-    const slopeAngleZ = Math.atan2(rh, W/2);
-    const slopeLenZ = Math.sqrt((W/2)*(W/2) + rh*rh);
-    parts.push({ geo: makeBoxGeo(slopeLenZ, 0.22, ridgeLen,  W/4, h + rh/2, 0, 0, 0, -slopeAngleZ), color: roofC });
-    parts.push({ geo: makeBoxGeo(slopeLenZ, 0.22, ridgeLen, -W/4, h + rh/2, 0, 0, 0,  slopeAngleZ), color: roofC });
-  }
-
-  // Foundation slab below ground
-  parts.push({ geo: makeBoxGeo(w+0.8, 2.5, d+0.8, 0, -1.25 + 0.1, 0), color: 0x2a2828 });
-
-  if (!makeBuilding._mat) {
-    makeBuilding._mat = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-    });
-  }
-  const mesh = makeMergedMesh(parts, makeBuilding._mat);
-  for (const p of parts) p.geo.dispose();
-  if (!mesh) return;
-  mesh.position.set(x, groundY, z);
-  if (rotY !== undefined) mesh.rotation.y = rotY;
-  mesh.castShadow = false;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
-
-  // LOS-blocking sentinels for 3 walls (skip front where door is). losOnly = bots can't see through but player can pass.
-  const halfW = (w / 2) * 1.05, halfD = (d / 2) * 1.05;
-  const wallThick = 0.5;
-  function addWallSentinel(cx, cz, ww, wd) {
-    const obj = new THREE.Object3D();
-    obj.userData.bbox = new THREE.Box3(
-      new THREE.Vector3(cx - ww/2, groundY - 0.3, cz - wd/2),
-      new THREE.Vector3(cx + ww/2, groundY + h + 0.5, cz + wd/2)
-    );
-    obj.userData.losOnly = true;
-    buildings.push(obj);
-  }
-  const facingAng = rotY || 0;
-  const cosR = Math.cos(facingAng), sinR = Math.sin(facingAng);
-  function rotPos(lx, lz) { return { x: x + lx*cosR - lz*sinR, z: z + lx*sinR + lz*cosR }; }
-  const lwp = rotPos(-halfW, 0); addWallSentinel(lwp.x, lwp.z, wallThick, d + wallThick*2);
-  const rwp = rotPos( halfW, 0); addWallSentinel(rwp.x, rwp.z, wallThick, d + wallThick*2);
-  const bwp = rotPos(0, -halfD); addWallSentinel(bwp.x, bwp.z, w + wallThick*2, wallThick);
-  // front wall: no sentinel — door area is open
-}
+// Legacy makeBuilding has been removed — all suburban/commercial buildings now
+// come from src/buildings.js via generateNeighborhood().
 
 // ----- Trees: collect into batches, merged at end of world build -----
 const TREE_GREENS = [
@@ -3923,12 +4277,26 @@ function initZone() {
   zone.ring.position.y = 0.5;
   zone.ring.scale.set(MAP.size, 1, MAP.size);
   scene.add(zone.ring);
-  // wall — cylinder built at radius=1, scaled per-frame
-  const wallGeo = new THREE.CylinderGeometry(1, 1, 80, 64, 1, true);
-  zone.wallMat = new THREE.MeshBasicMaterial({ color:0x0099ff, transparent:true, opacity:0.18, side:THREE.DoubleSide });
+  // wall — cylinder built at radius=1, scaled per-frame.
+  // 32 radial segments is plenty for a wall at ~700m radius (the curvature is
+  // imperceptible). BackSide-only renders just the inner face we see from
+  // inside the zone, cutting fragment cost in half vs DoubleSide. depthWrite
+  // off is the standard for transparent meshes so they don't occlude later
+  // transparents incorrectly.
+  // 40m tall (half the original 80m) — still imposing visually but covers
+  // ~half the vertical FOV near the wall, dropping fragment cost noticeably.
+  const wallGeo = new THREE.CylinderGeometry(1, 1, 40, 32, 1, true);
+  zone.wallMat = new THREE.MeshBasicMaterial({
+    color: 0x0099ff,
+    transparent: true,
+    opacity: 0.18,
+    side: THREE.BackSide,
+    depthWrite: false,
+  });
   zone.wall = new THREE.Mesh(wallGeo, zone.wallMat);
-  zone.wall.position.y = 40;
+  zone.wall.position.y = 20;
   zone.wall.scale.set(MAP.size, 1, MAP.size);
+  zone.wall.renderOrder = 999; // draw after opaque + after grass
   scene.add(zone.wall);
 }
 function updateZone(dt) {

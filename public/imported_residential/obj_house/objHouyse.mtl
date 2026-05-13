@@ -1,0 +1,56 @@
+newmtl lambert153SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd germanyrose22.jpg
+bump -bm 0.01 germany010b.jpg
+Ni 1.00
+newmtl lambert154SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd brick09aaa.jpg
+bump -bm 0.1 brick09aaa.jpg
+Ni 1.00
+newmtl lambert155SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd entr002M.jpg
+bump -bm 0.02 entr002M.jpg
+Ni 1.00
+newmtl lambert156SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd clay07XL.jpg
+bump -bm 1 clay07XLb.jpg
+Ni 1.00
+newmtl lambert157SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd hungary009.jpg
+bump -bm 1 hungary009b.jpg
+Ni 1.00
+newmtl lambert158SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd wndw107M.jpg
+bump -bm 0.1 wndw107Mb.jpg
+Ni 1.00
+newmtl lambert159SG
+illum 4
+Kd 1.00 1.00 1.00
+Ka 1.00 1.00 1.00
+Tf 1.00 1.00 1.00
+map_Kd wndw038M.jpg
+bump -bm 0.1 wndw038M.jpg
+Ni 1.00
