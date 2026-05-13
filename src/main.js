@@ -4911,6 +4911,58 @@ function buildMuzzleFlash() {
   // ambient-ish boost via hemisphere attached to camera
   const hemi = new THREE.HemisphereLight(0xddeeff, 0x222222, 0.45);
   camera.add(hemi);
+  // ── In-scene crosshair: a canvas-textured plane attached to the camera.
+  // Drawn as part of the WebGL frame, so there's no HTML/canvas compositor desync (no flicker). ──
+  buildCrosshairMesh();
+}
+let _crosshairMesh = null;
+function buildCrosshairMesh() {
+  const SIZE = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = SIZE;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  // outer white ring
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(SIZE/2, SIZE/2, 22, 0, Math.PI * 2);
+  ctx.stroke();
+  // tiny black ring just outside the white for contrast on bright backgrounds
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(SIZE/2, SIZE/2, 24.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(SIZE/2, SIZE/2, 19.5, 0, Math.PI * 2);
+  ctx.stroke();
+  // center orange dot
+  ctx.fillStyle = '#ff5028';
+  ctx.beginPath();
+  ctx.arc(SIZE/2, SIZE/2, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 1;
+  // Size: tuned so the visible reticle is ~24px on a 1080p screen at default FOV (72°).
+  const dist = 0.4;
+  const planeSize = 0.024;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true,
+    depthTest: false, depthWrite: false,
+    fog: false,
+  });
+  const geo = new THREE.PlaneGeometry(planeSize, planeSize);
+  _crosshairMesh = new THREE.Mesh(geo, mat);
+  _crosshairMesh.position.set(0, 0, -dist);
+  _crosshairMesh.renderOrder = 9999;
+  camera.add(_crosshairMesh);
 }
 function attachMuzzleFlashToViewmodel() {
   if (muzzleFlash) {
@@ -5248,18 +5300,19 @@ function updatePlayer(dt) {
   const stats = player.weapon ? player.effectiveStats() : null;
   const scopeEl = document.getElementById('scope');
   const reddotEl = document.getElementById('reddotOverlay');
-  const cross = document.getElementById('crosshair');
   const r4 = document.getElementById('reticle4x');
   const r2 = document.getElementById('reticle2x');
   const isScoped = player.isAds && stats && stats.scope;
   const scopeType = isScoped ? stats.scope : null;
 
   // Telescopic scopes (2x/4x/8x) → full black overlay + reticle SVG
+  // The crosshair is now a WebGL mesh attached to the camera (see buildCrosshairMesh).
+  // We toggle its visibility instead of the HTML element's class.
+  let showCrosshair;
   if (scopeType === 'scope4x' || scopeType === 'scope8x' || scopeType === 'scope2x') {
     scopeEl.classList.add('on');
     reddotEl.classList.remove('on');
-    cross.classList.add('ads');
-    // Swap reticle group
+    showCrosshair = false;
     if (scopeType === 'scope2x') {
       r4.setAttribute('display','none');
       r2.setAttribute('display','inline');
@@ -5268,15 +5321,15 @@ function updatePlayer(dt) {
       r2.setAttribute('display','none');
     }
   } else if ((scopeType === 'reddot' || scopeType === 'holo') && player.isAds) {
-    // Red dot: no black overlay, just the tiny dot in the centre
     scopeEl.classList.remove('on');
     reddotEl.classList.add('on');
-    cross.classList.add('ads');
+    showCrosshair = false;
   } else {
     scopeEl.classList.remove('on');
     reddotEl.classList.remove('on');
-    cross.classList.toggle('ads', player.isAds);
+    showCrosshair = !player.isAds;
   }
+  if (_crosshairMesh) _crosshairMesh.visible = showCrosshair;
 }
 
 function positionCamera() {
@@ -6084,9 +6137,9 @@ function flashDamage() {
 let _hitmarkerTimer = null;
 function showHitmarker() {
   const h = document.getElementById('hitmarker');
-  h.style.opacity = 1;
+  h.classList.add('show');
   if (_hitmarkerTimer) clearTimeout(_hitmarkerTimer);
-  _hitmarkerTimer = setTimeout(() => { h.style.opacity = 0; }, 120);
+  _hitmarkerTimer = setTimeout(() => { h.classList.remove('show'); }, 140);
 }
 function flashMuzzle() {
   if (muzzleFlash) {
