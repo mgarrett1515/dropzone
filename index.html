@@ -5,54 +5,121 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DROPZONE — Battle Royale Prototype</title>
 <link rel="stylesheet" href="/src/style.css">
+<link rel="stylesheet" href="/src/lobby.css">
 </head>
 <body>
 
+<!--
+  Lobby / main menu. Layout is a CSS grid (see lobby.css): player card top-left,
+  tab bar top-center, character preview + play dock fill the centre, tab panels
+  swap the centre content. All gameplay-control IDs (botCount, botSkill, viewMode,
+  shoulder, mapSize, gamertagInput, playBtn, rangeBtn) are preserved so the
+  existing main.js wiring binds unchanged. lobby.js owns the 3D preview + tabs.
+-->
 <div id="menu">
-  <h1>DROPZONE</h1>
-  <div class="sub">— BATTLE  ROYALE  PROTOTYPE —</div>
-  <div class="panel">
-    <div class="row">
-      <label>BOT COUNT</label>
-      <input type="range" id="botCount" min="5" max="60" value="20">
-      <div class="val" id="botCountVal">20</div>
-    </div>
-    <div class="row">
-      <label>BOT SKILL</label>
-      <div class="seg" id="botSkill">
-        <button data-v="0.4">EASY</button>
-        <button data-v="0.7" class="on">NORMAL</button>
-        <button data-v="1.0">HARD</button>
+  <!-- Full-bleed 3D environment background — lobby.js mounts its canvas here.
+       Sits behind the whole UI grid; shows on every tab. -->
+  <div id="lobbyCharViewport"></div>
+  <!-- Atmospheric overlays (vignette + edge darkening + subtle scanlines) -->
+  <div id="lobbyVignette"></div>
+
+  <!-- Tactical HUD details: a brand stripe down the left edge + corner reticles -->
+  <div id="lobbyBrandStripe"></div>
+  <div class="lobby-corner tl"></div>
+  <div class="lobby-corner tr"></div>
+  <div class="lobby-corner bl"></div>
+  <div class="lobby-corner br"></div>
+
+  <!-- Top-left: massive brand + player callsign card -->
+  <div id="lobbyTopLeft">
+    <div id="lobbyBrand">DROPZONE</div>
+    <div id="lobbyBrandTag">// BATTLE ROYALE · v0.1</div>
+    <div id="lobbyPlayerCard">
+      <div class="lpc-avatar"></div>
+      <div class="lpc-body">
+        <div class="lpc-tag">CALLSIGN</div>
+        <input type="text" id="gamertagInput" maxlength="16" placeholder="ENTER NAME">
+        <div class="lpc-sub">AGENT · BR PROTO</div>
       </div>
     </div>
-    <div class="row">
-      <label>VIEW</label>
-      <div class="seg" id="viewMode">
-        <button data-v="fp" class="on">FIRST PERSON</button>
-        <button data-v="tp">THIRD PERSON</button>
+  </div>
+
+  <!-- Top-center: numbered tactical tabs -->
+  <nav id="lobbyTabs">
+    <button class="lobby-tab on" data-tab="lobby"><span class="lt-num">01</span>LOBBY</button>
+    <button class="lobby-tab" data-tab="settings"><span class="lt-num">02</span>SETTINGS</button>
+    <button class="lobby-tab" data-tab="controls"><span class="lt-num">03</span>CONTROLS</button>
+  </nav>
+
+  <!-- LOBBY tab: just the play dock — the character lives in the 3D background -->
+  <section class="lobby-panel on" data-panel="lobby">
+    <div id="lobbyPlayDock">
+      <div class="seg" id="lobbyModeToggle">
+        <button data-mode="normal" class="on">BATTLE ROYALE</button>
+        <button data-mode="range">SHOOTING RANGE</button>
+      </div>
+      <button id="lobbyPlayBtn">DROP IN</button>
+    </div>
+  </section>
+
+  <!-- SETTINGS tab: the pre-match config form (unchanged control IDs) -->
+  <section class="lobby-panel" data-panel="settings">
+    <div class="panel">
+      <div class="row">
+        <label>BOT COUNT</label>
+        <input type="range" id="botCount" min="5" max="60" value="20">
+        <div class="val" id="botCountVal">20</div>
+      </div>
+      <div class="row">
+        <label>BOT SKILL</label>
+        <div class="seg" id="botSkill">
+          <button data-v="0.4">EASY</button>
+          <button data-v="0.7" class="on">NORMAL</button>
+          <button data-v="1.0">HARD</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>VIEW</label>
+        <div class="seg" id="viewMode">
+          <button data-v="fp" class="on">FIRST PERSON</button>
+          <button data-v="tp">THIRD PERSON</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>SHOULDER</label>
+        <div class="seg" id="shoulder">
+          <button data-v="r" class="on">RIGHT</button>
+          <button data-v="l">LEFT</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>MAP SIZE</label>
+        <div class="seg" id="mapSize">
+          <button data-v="400">SMALL</button>
+          <button data-v="700" class="on">MEDIUM</button>
+          <button data-v="1000">LARGE</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>FOV</label>
+        <input type="range" id="fovSlider" min="60" max="110" step="1" value="75">
+        <div class="val" id="fovVal">75</div>
+      </div>
+      <div class="row">
+        <label>SENSITIVITY</label>
+        <input type="range" id="sensSlider" min="0.1" max="3" step="0.05" value="1">
+        <div class="val" id="sensVal">1.00</div>
+      </div>
+      <div class="row">
+        <label>VOLUME</label>
+        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.7">
+        <div class="val" id="volumeVal">70%</div>
       </div>
     </div>
-    <div class="row">
-      <label>SHOULDER</label>
-      <div class="seg" id="shoulder">
-        <button data-v="r" class="on">RIGHT</button>
-        <button data-v="l">LEFT</button>
-      </div>
-    </div>
-    <div class="row">
-      <label>MAP SIZE</label>
-      <div class="seg" id="mapSize">
-        <button data-v="400">SMALL</button>
-        <button data-v="700" class="on">MEDIUM</button>
-        <button data-v="1000">LARGE</button>
-      </div>
-    </div>
-    <div class="row">
-      <label>GAMERTAG</label>
-      <input type="text" id="gamertagInput" maxlength="16" placeholder="ENTER NAME" style="background:#111;color:#fff;border:1px solid #444;padding:4px 8px;font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;width:140px;text-transform:uppercase;">
-    </div>
-    <button id="playBtn">DROP IN</button>
-    <button id="rangeBtn" style="margin-top:10px;width:100%;padding:12px;border:1px solid #ff5028;background:transparent;color:#ff5028;font-family:'Bebas Neue';font-size:22px;letter-spacing:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,80,40,0.15)'" onmouseout="this.style.background='transparent'">SHOOTING RANGE</button>
+  </section>
+
+  <!-- CONTROLS tab -->
+  <section class="lobby-panel" data-panel="controls">
     <div class="controls-hint">
       <b>CONTROLS</b><br>
       WASD move · SHIFT sprint · SPACE jump · C crouch (toggle)<br>
@@ -60,7 +127,12 @@
       LMB shoot · RMB aim · R reload · F loot · H heal<br>
       1/2/3 weapons · TAB inventory · M minimap · ESC pause
     </div>
-  </div>
+  </section>
+
+  <!-- Hidden logical triggers: keep main.js's playBtn/rangeBtn listeners valid.
+       #lobbyPlayBtn + #lobbyModeToggle (wired in lobby.js) proxy-click these. -->
+  <button id="playBtn" hidden></button>
+  <button id="rangeBtn" hidden></button>
 </div>
 
 <div id="vignette"></div>
@@ -141,6 +213,8 @@
   </div>
   <div id="lootPrompt"><b>F</b> <span id="lootText"></span></div>
   <div id="killfeed"></div>
+  <div id="killBanner"></div>
+  <div id="supplyNotice">SUPPLY DROP INCOMING</div>
 </div>
 
 <div id="inventoryPanel">

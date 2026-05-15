@@ -118,12 +118,37 @@ canvas { display:block; }
   transition: opacity 0.18s ease-out, transform 0.12s ease-out;
 }
 #hitmarker.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+#hitmarker.headshot.show { transform:translate(-50%,-50%) scale(1.35); }
 #hitmarker span {
   position:absolute; background:#fff; width:3px; height:13px;
   border-radius: 1px;
   /* subtle drop shadow so it reads on both bright and dark backgrounds */
   filter: drop-shadow(0 0 1px #000);
 }
+/* headshot — red marker, slightly fatter */
+#hitmarker.headshot span { background:#ff3322; width:4px; }
+
+/* KILL BANNER — centered "ELIMINATED X" pop on a player kill */
+#killBanner {
+  position:fixed; top:38%; left:50%;
+  transform:translate(-50%,-50%) scale(0.8);
+  pointer-events:none; opacity:0;
+  font-family:'Bebas Neue', sans-serif; font-size:34px; letter-spacing:6px;
+  color:#ff5028; text-shadow:0 0 16px rgba(255,80,40,0.7), 2px 2px 0 #000;
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+#killBanner.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+
+/* SUPPLY DROP NOTICE — cyan banner near the top when a drop spawns */
+#supplyNotice {
+  position:fixed; top:88px; left:50%;
+  transform:translate(-50%,-12px);
+  pointer-events:none; opacity:0;
+  font-family:'Bebas Neue', sans-serif; font-size:22px; letter-spacing:5px;
+  color:#33ddff; text-shadow:0 0 14px rgba(51,221,255,0.7), 1px 1px 0 #000;
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+#supplyNotice.show { opacity:1; transform:translate(-50%,0); }
 #hitmarker .tl { top:-19px; left:-1.5px; transform:rotate(-45deg); transform-origin:bottom center; }
 #hitmarker .tr { top:-19px; left:-1.5px; transform:rotate( 45deg); transform-origin:bottom center; }
 #hitmarker .bl { bottom:-19px; left:-1.5px; transform:rotate( 45deg); transform-origin:top center; }

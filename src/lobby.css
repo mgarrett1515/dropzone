@@ -1,0 +1,271 @@
+/* ============================================================================
+   LOBBY / MAIN MENU — "tactical operations console" direction
+   ----------------------------------------------------------------------------
+   Loaded after style.css. The 3D environment (lobby.js) is a full-bleed canvas
+   background; this file styles the UI that floats over it. Sharp corners, a
+   massive brand, mono labels, numbered tabs with an underline-active state,
+   HUD corner reticles, and a brand stripe down the left edge.
+
+   Deliberate exclusions (these are AI-slop patterns):
+     • no backdrop-filter blur (also a real perf cost over animated WebGL)
+     • no full-orange-pill active tabs
+     • no left-accent-border on rounded cards
+     • no rounded corners on UI panels
+   ============================================================================ */
+
+#menu {
+  --accent: #ff5028;
+  --accent-2: #ff8a3c;
+  --accent-deep: #c43818;
+  --ink: #e8ecf2;
+  --ink-dim: #8a93a3;
+  --ink-faint: #555c6a;
+  --glass: rgba(8, 11, 18, 0.86);
+  --glass-line: rgba(255, 255, 255, 0.08);
+
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "topleft tabs    topright"
+    "stage   stage   stage";
+  gap: 24px;
+  padding: clamp(18px, 3.2vh, 44px) clamp(28px, 4.5vw, 72px);
+  align-items: start;
+  background: #05070c;
+}
+
+/* ── Full-bleed 3D environment background (lobby.js mounts its canvas here) ─ */
+#lobbyCharViewport { position: absolute; inset: 0; z-index: 0; }
+#lobbyCharViewport canvas { display: block; width: 100%; height: 100%; }
+
+/* ── Atmospheric overlay: vignette + edges + faint scanlines ───────────── */
+#lobbyVignette {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 72% 78% at 50% 46%, transparent 38%, rgba(0,0,0,0.62) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 20% 80%, rgba(0,0,0,0.6) 100%),
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,0.022) 3px 4px);
+}
+
+/* ── Tactical HUD: brand stripe + corner reticles ──────────────────────── */
+#lobbyBrandStripe {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(180deg,
+    transparent 0%, var(--accent) 12%, var(--accent) 88%, transparent 100%);
+  box-shadow: 0 0 14px rgba(255, 80, 40, 0.55);
+}
+.lobby-corner {
+  position: absolute; z-index: 2; pointer-events: none;
+  width: 28px; height: 28px;
+  border: 2px solid var(--accent);
+}
+.lobby-corner.tl { top: 16px; left: 16px;     border-right: none;  border-bottom: none; }
+.lobby-corner.tr { top: 16px; right: 16px;    border-left: none;   border-bottom: none; }
+.lobby-corner.bl { bottom: 16px; left: 16px;  border-right: none;  border-top: none; }
+.lobby-corner.br { bottom: 16px; right: 16px; border-left: none;   border-top: none; }
+
+/* All UI floats above the canvas/vignette/HUD. */
+#lobbyTopLeft, #lobbyTabs, .lobby-panel { position: relative; z-index: 3; }
+
+/* ── Top-left: massive brand + callsign card ───────────────────────────── */
+#lobbyTopLeft {
+  grid-area: topleft; display: flex; flex-direction: column;
+  gap: 6px;
+  animation: lobbyEnter 0.55s cubic-bezier(.18,.78,.27,1) both;
+  animation-delay: 0.08s;
+}
+
+#lobbyBrand {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(58px, 7vw, 108px);
+  letter-spacing: 0.03em;
+  line-height: 0.9;
+  color: #fff;
+  /* Hard offset + accent halo — dramatic, but a single intentional shadow,
+     not a pile of effects. */
+  text-shadow: 0 0 32px rgba(255, 80, 40, 0.55), 3px 3px 0 #000;
+}
+#lobbyBrand::first-letter { color: var(--accent); }
+
+#lobbyBrandTag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 4px;
+  color: var(--ink-faint);
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+#lobbyPlayerCard {
+  display: flex; align-items: stretch; gap: 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  /* sharp corners — replaces the slop "rounded card with colored left border" */
+  padding: 12px 16px;
+  max-width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.lpc-avatar {
+  width: 48px; flex-shrink: 0;
+  background: linear-gradient(135deg, #33405a, #11151f);
+  border: 1px solid #3a4356;
+  clip-path: polygon(50% 8%, 64% 22%, 64% 40%, 82% 56%, 82% 100%, 18% 100%, 18% 56%, 36% 40%, 36% 22%);
+}
+.lpc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lpc-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; letter-spacing: 3px;
+  color: var(--accent);
+}
+#gamertagInput {
+  background: rgba(0, 0, 0, 0.45); color: #fff;
+  border: 1px solid var(--glass-line);
+  padding: 5px 9px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 19px; letter-spacing: 2px;
+  width: 170px; text-transform: uppercase;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+#gamertagInput:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 80, 40, 0.22);
+}
+.lpc-sub { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 2.5px; color: var(--ink-faint); }
+
+/* ── Top-center: numbered tabs, underline-active (no orange pill) ──────── */
+#lobbyTabs {
+  grid-area: tabs; display: flex; gap: 0;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  padding: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  animation: lobbyEnter 0.55s cubic-bezier(.18,.78,.27,1) both;
+  animation-delay: 0.16s;
+}
+.lobby-tab {
+  background: transparent; border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--ink-dim);
+  font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 4px;
+  padding: 12px 28px 9px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.lobby-tab .lt-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; letter-spacing: 1px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+.lobby-tab:hover { color: #fff; }
+.lobby-tab:hover .lt-num { opacity: 1; }
+.lobby-tab.on {
+  color: #fff;
+  border-bottom-color: var(--accent);
+  background: linear-gradient(180deg, transparent 60%, rgba(255, 80, 40, 0.08) 100%);
+}
+.lobby-tab.on .lt-num { opacity: 1; }
+
+/* ── Stage: panels stacked in one grid cell, crossfaded ────────────────── */
+.lobby-panel {
+  grid-area: stage;
+  align-self: stretch;
+  display: flex; flex-direction: column; align-items: center;
+  min-height: 0;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.lobby-panel:not(.on) { opacity: 0; transform: translateY(10px); pointer-events: none; }
+.lobby-panel.on { opacity: 1; transform: translateY(0); }
+
+/* ── LOBBY panel: play dock, pinned to the bottom ──────────────────────── */
+.lobby-panel[data-panel="lobby"] { justify-content: flex-end; }
+
+#lobbyPlayDock {
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding-bottom: clamp(20px, 5.5vh, 62px);
+  animation: lobbyEnter 0.6s cubic-bezier(.18,.78,.27,1) both;
+  animation-delay: 0.28s;
+}
+#lobbyModeToggle {
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  padding: 3px;
+}
+#lobbyModeToggle button {
+  font-family: 'Bebas Neue', sans-serif; font-size: 14px; letter-spacing: 2px;
+  padding: 7px 22px; border: none; background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+#lobbyModeToggle button:hover:not(.on) { color: #fff; }
+#lobbyModeToggle button.on {
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  color: #1a0c06;
+}
+
+/* The big primary action — sharp, massive, framed with accent brackets. */
+#lobbyPlayBtn {
+  position: relative;
+  border: none; cursor: pointer;
+  background: linear-gradient(180deg, #ff6a44, var(--accent) 60%, var(--accent-deep));
+  color: #1a0c06;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(40px, 5.6vw, 64px); letter-spacing: 16px;
+  padding: 18px 96px 18px 112px;     /* extra left pad offsets the tracking */
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.32);
+  box-shadow:
+    0 12px 36px rgba(255, 80, 40, 0.32),
+    inset 0 2px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -3px 10px rgba(0, 0, 0, 0.35);
+  animation: playGlow 2.4s ease-in-out infinite;
+  transition: transform 0.12s ease, filter 0.15s ease;
+}
+#lobbyPlayBtn::before, #lobbyPlayBtn::after {
+  content: ''; position: absolute;
+  top: -8px; bottom: -8px; width: 18px;
+  border: 3px solid var(--accent);
+  pointer-events: none;
+}
+#lobbyPlayBtn::before { left: -14px; border-right: none; }
+#lobbyPlayBtn::after  { right: -14px; border-left: none; }
+#lobbyPlayBtn:hover { transform: scale(1.03); filter: brightness(1.12); }
+#lobbyPlayBtn:active { transform: scale(0.975); }
+
+@keyframes playGlow {
+  0%, 100% { box-shadow: 0 12px 36px rgba(255,80,40,0.32), inset 0 2px 0 rgba(255,255,255,0.30), inset 0 -3px 10px rgba(0,0,0,0.35); }
+  50%      { box-shadow: 0 12px 50px rgba(255,80,40,0.66), inset 0 2px 0 rgba(255,255,255,0.30), inset 0 -3px 10px rgba(0,0,0,0.35); }
+}
+
+/* ── SETTINGS / CONTROLS: solid dark panels (no rounded corners) ───────── */
+.lobby-panel[data-panel="settings"],
+.lobby-panel[data-panel="controls"] { justify-content: center; }
+
+.lobby-panel .panel,
+.lobby-panel .controls-hint {
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 0;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.lobby-panel .controls-hint { padding: 22px 30px; margin-top: 0; }
+
+/* Tactile feedback shared by all menu segmented buttons. */
+#menu .seg button:active { transform: translateY(1px); }
+
+/* ── Entrance choreography — one-shot fade+rise on page load ───────────── */
+@keyframes lobbyEnter {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (aspect-ratio >= 2/1) {
+  #menu { grid-template-columns: 1.4fr auto 1.4fr; }
+}
+@media (max-aspect-ratio: 16/10) and (max-height: 720px) {
+  #lobbyBrand { font-size: clamp(46px, 5.5vw, 78px); }
+  #lobbyPlayBtn { font-size: 32px; padding: 12px 68px 12px 82px; letter-spacing: 12px; }
+  #lobbyPlayBtn::before, #lobbyPlayBtn::after { width: 14px; }
+}
